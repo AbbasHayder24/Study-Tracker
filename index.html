@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Study Tracker</title>
+
+  <!-- App Icon & Home Screen Name -->
+  <link rel="icon" type="image/png" href="image.png" />
+  <link rel="apple-touch-icon" href="image.png" />
+  <meta name="apple-mobile-web-app-title" content="Study Tracker" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Instant dark mode & RTL/LTR direction before first paint -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('study_tracker_theme');
+        var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (saved === 'dark' || (!saved && sysDark)) {
+          document.documentElement.classList.add('dark');
+        }
+        var lang = localStorage.getItem('study_tracker_lang');
+        if (lang === 'ar') {
+          document.documentElement.lang = 'ar';
+          document.documentElement.dir = 'rtl';
+        }
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- 100% local CSS for instant boot -->
+  <link rel="stylesheet" href="css/styles.css?v=25" />
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen pb-20 transition-colors">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-white/90 dark:bg-slate-800/90 backdrop-blur border-b border-slate-200 dark:border-slate-700">
+    <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <img src="image.png" alt="Logo" class="w-8 h-8 rounded-xl shrink-0" onerror="this.style.display='none'; document.getElementById('logo-fallback').classList.remove('hidden');" />
+        <span id="logo-fallback" class="hidden text-xl">🎓</span>
+        <div class="min-w-0">
+          <h1 id="app-header-title" class="text-sm font-extrabold truncate">Study Tracker</h1>
+        </div>
+      </div>
+      <div id="app-header-meta" class="flex items-center gap-1.5 shrink-0"></div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main id="app-main" class="max-w-lg mx-auto px-3.5 py-4"></main>
+
+  <!-- Bottom 6-Tab Navigation -->
+  <nav id="app-bottom-nav" class="fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-800/95 backdrop-blur border-t border-slate-200 dark:border-slate-700 flex max-w-lg mx-auto"></nav>
+
+  <!-- Toast Notification -->
+  <div id="app-toast" class="hidden opacity-0"></div>
+
+  <!-- Custom Modal -->
+  <div id="app-modal-backdrop" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+        <h3 id="app-modal-title" class="text-sm font-bold text-slate-800 dark:text-slate-100"></h3>
+        <button type="button" onclick="window.AppUI.closeModal()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
+      </div>
+      <div id="app-modal-body" class="p-4"></div>
+      <div id="app-modal-footer" class="px-4 py-3 bg-slate-50 dark:bg-slate-900/50 flex justify-end gap-2"></div>
+    </div>
+  </div>
+
+  <!-- 15 Modular Local JS Files -->
+  <script src="js/config.js?v=26"></script>
+  <script src="js/i18n.js?v=26"></script>
+  <script src="js/state.js?v=26"></script>
+  <script src="js/push.js?v=27"></script>
+  <script src="js/ledger.js?v=26"></script>
+  <script src="js/ui.js?v=26"></script>
+  <script src="js/bookshelf.js?v=26"></script>
+  <script src="js/tasks.js?v=26"></script>
+  <script src="js/habits.js?v=26"></script>
+  <script src="js/focus.js?v=26"></script>
+  <script src="js/stats.js?v=26"></script>
+  <script src="js/reviews.js?v=26"></script>
+  <script src="js/challenge.js?v=26"></script>
+  <script src="js/settings.js?v=27"></script>
+  <script src="js/app.js?v=26"></script>
+</body>
+</html>
