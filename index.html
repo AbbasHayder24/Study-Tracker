@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Study Tracker" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#4f46e5" />
+  <meta id="meta-theme-color" name="theme-color" content="#F4F0E8" />
   <link rel="manifest" href="manifest.json" />
 
   <!-- Instant dark mode & RTL/LTR direction before first paint -->
@@ -20,8 +20,11 @@
       try {
         var saved = localStorage.getItem('study_tracker_theme');
         var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        if (saved === 'dark' || (!saved && sysDark)) {
+        var isDark = (saved === 'dark' || (!saved && sysDark));
+        if (isDark) {
           document.documentElement.classList.add('dark');
+          var tc = document.getElementById('meta-theme-color');
+          if (tc) tc.setAttribute('content', '#090C12');
         }
         var lang = localStorage.getItem('study_tracker_lang');
         if (lang === 'ar') {
@@ -33,7 +36,7 @@
   </script>
 
   <!-- 100% local CSS for instant boot -->
-  <link rel="stylesheet" href="css/styles.css?v=25" />
+  <link rel="stylesheet" href="css/styles.css?v=29" />
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen pb-20 transition-colors">
 
@@ -73,20 +76,20 @@
   </div>
 
   <!-- 15 Modular Local JS Files -->
-  <script src="js/config.js?v=26"></script>
-  <script src="js/i18n.js?v=26"></script>
-  <script src="js/state.js?v=26"></script>
-  <script src="js/push.js?v=27"></script>
-  <script src="js/ledger.js?v=26"></script>
-  <script src="js/ui.js?v=26"></script>
-  <script src="js/bookshelf.js?v=26"></script>
-  <script src="js/tasks.js?v=26"></script>
-  <script src="js/habits.js?v=26"></script>
-  <script src="js/focus.js?v=26"></script>
-  <script src="js/stats.js?v=26"></script>
-  <script src="js/reviews.js?v=26"></script>
-  <script src="js/challenge.js?v=26"></script>
-  <script src="js/settings.js?v=27"></script>
-  <script src="js/app.js?v=26"></script>
+  <script defer src="js/config.js?v=26"></script>
+  <script defer src="js/i18n.js?v=26"></script>
+  <script defer src="js/state.js?v=26"></script>
+  <script defer src="js/push.js?v=27"></script>
+  <script defer src="js/ledger.js?v=26"></script>
+  <script defer src="js/ui.js?v=26"></script>
+  <script defer src="js/bookshelf.js?v=26"></script>
+  <script defer src="js/tasks.js?v=26"></script>
+  <script defer src="js/habits.js?v=26"></script>
+  <script defer src="js/focus.js?v=26"></script>
+  <script defer src="js/stats.js?v=26"></script>
+  <script defer src="js/reviews.js?v=26"></script>
+  <script defer src="js/challenge.js?v=26"></script>
+  <script defer src="js/settings.js?v=27"></script>
+  <script defer src="js/app.js?v=29"></script>
 </body>
 </html>

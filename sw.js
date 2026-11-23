@@ -1,15 +1,61 @@
 /**
- * sw.js — Service Worker for Study Tracker Background Web Push (iOS 16.4+ PWA, Android, Desktop)
+ * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
+const APP_CACHE = 'study-tracker-shell-v29';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
+const CORE_ASSETS = [
+  './',
+  './index.html',
+  './manifest.json',
+  './image.png',
+  './css/styles.css?v=29'
+];
+
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(APP_CACHE)
+    .then((cache) => cache.addAll(CORE_ASSETS).catch(() => {}))
+    .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys()
+    .then((keys) => Promise.all(
+      keys
+      .filter((k) => k.startsWith('study-tracker-shell-') && k !== APP_CACHE)
+      .map((k) => caches.delete(k))
+    ))
+    .then(() => self.clients.claim())
+  );
+});
+
+// Stale-While-Revalidate for same-origin static files (instant boot + background updates)
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.includes('__study_tracker_push_meta__')) return;
+  
+  event.respondWith(
+    caches.open(APP_CACHE).then((cache) =>
+      cache.match(req).then((cached) => {
+        const networkFetch = fetch(req)
+          .then((res) => {
+            if (res && res.ok && res.type === 'basic') {
+              cache.put(req, res.clone()).catch(() => {});
+            }
+            return res;
+          })
+          .catch(() => cached);
+        return cached || networkFetch;
+      })
+    )
+  );
 });
 
 async function getSavedPushMeta() {
@@ -35,11 +81,11 @@ self.addEventListener('push', (event) => {
         } catch (e2) {}
       }
     }
-
+    
     const saved = await getSavedPushMeta();
     const title = (payload && payload.title) || (saved && saved.title) || 'Study Session Complete! 📚';
     const body = (payload && payload.body) || (saved && saved.body) || 'Your Focus timer has finished. Great work!';
-
+    
     // Safari / iOS strictly requires showing a visible notification on every push event
     await self.registration.showNotification(title, {
       body,
@@ -55,7 +101,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = (event.notification.data && event.notification.data.url) || './';
-
+  
   event.waitUntil((async () => {
     const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of allClients) {
