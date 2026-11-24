@@ -2,6 +2,7 @@
  * challenge.js — Challenge tab: summary dashboard, customizable challenge editor, dynamic day log, and reviews (EN/AR)
  */
 window.ChallengeModule = (function () {
+  let previewPenalty = false;
   let subView = 'summary';
   let selectedWeek = 'all';
 
@@ -168,11 +169,23 @@ window.ChallengeModule = (function () {
 
     return `
       <div class="space-y-3">
-        ${ledger.penaltyAlert ? `
-          <div class="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-900/30 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200 text-xs font-medium">
-            ${t('penaltyAlertText', { bw: biWeekTag, h: window.AppUI.formatHours(ledger.carriedDeficit), lim: window.AppUI.formatHours(ledger.config.penaltyThresholdHours) })}
+        ${(() => { const list = [...(ledger.pendingPenalties || [])]; if (previewPenalty) list.unshift({ key: '__preview_penalty__', label: 'W1-W2', deficit: 2.5, isPreview: true }); return list.length > 0 ? list.map(p => {
+          const ar = !!(window.I18n && window.I18n.isRTL());
+          const hrsTxt = window.AppUI.formatHours(p.deficit);
+          const msg = ar
+            ? `⚠️ <strong>عقوبة مستحقة (${window.AppUI.escapeHtml(p.label)}):</strong> انتهى الأسبوع الثاني بعجز <strong>${hrsTxt}${hUnit}</strong>. لن يختفي هذا التنبيه حتى تؤكد تنفيذ العقوبة.`
+            : `⚠️ <strong>Penalty Due (${window.AppUI.escapeHtml(p.label)}):</strong> Completed 2-week period with a <strong>${hrsTxt}${hUnit}</strong> deficit. This alert stays until you confirm the penalty is applied.`;
+          const btnTxt = ar ? '✅ أكّدت تنفيذ العقوبة' : '✅ Confirm Penalty Applied';
+          return `
+          <div class="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-900/30 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200 text-xs font-medium space-y-2.5">
+            <div>${msg}</div>
+            <button type="button" data-confirm-penalty="${window.AppUI.escapeHtml(p.key)}" data-penalty-label="${window.AppUI.escapeHtml(p.label)}"
+              class="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold">
+              ${btnTxt}
+            </button>
           </div>
-        ` : ''}
+          `;
+        }).join('') : ''; })()}
 
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
           <div class="flex items-center justify-between gap-2 mb-2">
@@ -184,6 +197,9 @@ window.ChallengeModule = (function () {
               <p class="text-[11px] text-slate-400">${window.AppUI.formatDate(ledger.startDate)} – ${window.AppUI.formatDate(ledger.endDate)}</p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
+              <button id="test-penalty-btn" type="button" class="px-2 py-1 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" title="${(window.I18n && window.I18n.isRTL()) ? 'تجربة ظهور العقوبة' : 'Preview Penalty'}">
+                🧪
+              </button>
               <button id="edit-challenge-btn" type="button" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                 ⚙️ ${t('edit')}
               </button>
@@ -383,6 +399,39 @@ window.ChallengeModule = (function () {
           window.AppUI.showToast(t('dayLogUpdated'), 'success');
           rerender();
         };
+      };
+    });
+
+    const testPenBtn = document.getElementById('test-penalty-btn');
+    if (testPenBtn) {
+      testPenBtn.onclick = () => {
+        previewPenalty = !previewPenalty;
+        rerender();
+      };
+    }
+
+    document.querySelectorAll('[data-confirm-penalty]').forEach(btn => {
+      btn.onclick = () => {
+        const key = btn.getAttribute('data-confirm-penalty');
+        const label = btn.getAttribute('data-penalty-label') || '';
+        const ar = !!(window.I18n && window.I18n.isRTL());
+        window.AppUI.confirmAction({
+          title: ar ? `تأكيد تنفيذ العقوبة (${label})` : `Confirm Penalty (${label})`,
+          message: ar
+            ? 'هل أنت متأكد أنك نفّذت العقوبة بالكامل؟ بعد التأكيد سيختفي التنبيه لهذه الفترة.'
+            : 'Are you sure you have completed the penalty? Confirming will dismiss this alert for this 2-week period.',
+          confirmText: ar ? 'نعم، نفّذتها' : 'Yes, Applied',
+          danger: true,
+          onConfirm: () => {
+            if (key === '__preview_penalty__') {
+              previewPenalty = false;
+            } else {
+              window.LedgerEngine.resolvePenalty(key);
+            }
+            window.AppUI.showToast(ar ? 'تم تأكيد تنفيذ العقوبة وإغلاق التنبيه' : 'Penalty confirmed & cleared', 'success');
+            rerender();
+          }
+        });
       };
     });
 

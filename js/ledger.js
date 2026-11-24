@@ -26,9 +26,7 @@ window.LedgerEngine = (function () {
     const dailyGraceHours = Number.isFinite(Number(custom.dailyGraceHours)) && Number(custom.dailyGraceHours) >= 0
       ? Number(custom.dailyGraceHours)
       : C.CHALLENGE.DAILY_GRACE_HOURS;
-    const penaltyThresholdHours = Number.isFinite(Number(custom.penaltyThresholdHours)) && Number(custom.penaltyThresholdHours) >= 0
-      ? Number(custom.penaltyThresholdHours)
-      : C.CHALLENGE.PENALTY_THRESHOLD_HOURS;
+    const penaltyThresholdHours = 0;
     const name = typeof custom.name === 'string' ? custom.name.trim() : '';
 
     return {
@@ -226,7 +224,30 @@ window.LedgerEngine = (function () {
     const avgDailyHours = elapsedDaysCount > 0 ? totalLogged / elapsedDaysCount : 0;
     const bestWeek = weeks.reduce((best, w) => (w.logged > (best ? best.logged : -1) ? w : best), null);
     const roundedDeficit = Math.round(carriedDeficit * 100) / 100;
-    const penaltyAlert = roundedDeficit > cfg.penaltyThresholdHours;
+    const resolvedPenalties = (data && data.resolvedPenalties && typeof data.resolvedPenalties === 'object')
+      ? data.resolvedPenalties
+      : {};
+    const pendingPenalties = [];
+    for (let bwIdx = 0; bwIdx * 2 < weeks.length; bwIdx++) {
+      const w1 = weeks[bwIdx * 2];
+      const w2 = weeks[bwIdx * 2 + 1];
+      const endWeek = w2 || w1;
+      const lastDay = endWeek && endWeek.days && endWeek.days[endWeek.days.length - 1];
+      const periodFullyEnded = !!(lastDay && !lastDay.isFuture && !lastDay.isToday);
+      if (periodFullyEnded && endWeek.deficitAfter > 0) {
+        const pKey = `bw_${bwIdx + 1}_${endWeek.endDate}`;
+        if (!resolvedPenalties[pKey]) {
+          pendingPenalties.push({
+            key: pKey,
+            biWeekNumber: bwIdx + 1,
+            label: w2 ? `W${w1.weekNumber}-W${w2.weekNumber}` : `W${w1.weekNumber}`,
+            deficit: endWeek.deficitAfter,
+            endDate: endWeek.endDate
+          });
+        }
+      }
+    }
+    const penaltyAlert = pendingPenalties.length > 0;
     const biWeekStart = currentBiWeekIndex * 2 + 1;
     const biWeekEnd = Math.min(cfg.totalWeeks, biWeekStart + 1);
 
@@ -253,6 +274,7 @@ window.LedgerEngine = (function () {
       biWeekLabel: biWeekStart === biWeekEnd ? `W${biWeekStart}` : `W${biWeekStart}–W${biWeekEnd}`,
       totalFlexUsed: Math.round(totalFlexUsed * 100) / 100,
       penaltyAlert,
+      pendingPenalties,
       elapsedDaysCount,
       avgDailyHours: Math.round(avgDailyHours * 100) / 100,
       bestWeek,
@@ -287,8 +309,20 @@ window.LedgerEngine = (function () {
     window.AppState.save();
   }
 
+  function resolvePenalty(penaltyKey) {
+    if (!penaltyKey) return;
+    const data = window.AppState.getData();
+    if (!data.resolvedPenalties || typeof data.resolvedPenalties !== 'object') {
+      data.resolvedPenalties = {};
+    }
+    data.resolvedPenalties[penaltyKey] = Date.now();
+    window.AppState.markLedgerDirty();
+    window.AppState.save();
+  }
+
   return {
     getChallengeConfig,
+    resolvePenalty,
     getDailyTarget,
     getDayName,
     getDayNameAr: getDayName,
