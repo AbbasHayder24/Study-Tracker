@@ -9,7 +9,6 @@ body {
   margin: 0;
   line-height: inherit;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: contain;
   color: #1C1917;
   background-color: #F4F0E8;
   background-image:
@@ -531,14 +530,8 @@ input[type="file"].file\:text-indigo-700::file-selector-button { color: #1E3A5F;
   letter-spacing: 0.03em;
 }
 
-/* GPU Layer Promotion for 120fps iOS Scrolling */
-header, #app-bottom-nav { transform: translateZ(0); will-change: transform; }
 
 /* === Global Cross-Device Alignment & Zero-Overflow Protection === */
-/* Native iOS scroll preserved on html/body; only clip horizontal overflow inside main */
-main {
-  overflow-x: clip;
-}
 
 /* Prevent any flex or grid child from pushing buttons outside the screen on iOS/Android */
 .flex > *,
