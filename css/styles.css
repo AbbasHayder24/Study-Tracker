@@ -1,4 +1,4 @@
-/* styles.css — Liquid Glass Theme (Zero CDN, Instant Boot) */
+/* styles.css — Liquid Glass Classic Theme (Zero CDN, Instant Boot) */
 *, ::before, ::after { box-sizing: border-box; border: 0 solid rgba(255, 255, 255, 0.45); }
 html {
   line-height: 1.5;
@@ -535,9 +535,9 @@ input[type="file"].file\:text-indigo-700::file-selector-button { color: #1E3A5F;
 header, #app-bottom-nav { transform: translateZ(0); will-change: transform; }
 
 /* === Global Cross-Device Alignment & Zero-Overflow Protection === */
-html, body {
-  max-width: 100%;
-  overflow-x: hidden;
+/* Native iOS scroll preserved on html/body; only clip horizontal overflow inside main */
+main {
+  overflow-x: clip;
 }
 
 /* Prevent any flex or grid child from pushing buttons outside the screen on iOS/Android */
