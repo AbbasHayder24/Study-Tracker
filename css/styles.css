@@ -533,3 +533,89 @@ input[type="file"].file\:text-indigo-700::file-selector-button { color: #1E3A5F;
 
 /* GPU Layer Promotion for 120fps iOS Scrolling */
 header, #app-bottom-nav { transform: translateZ(0); will-change: transform; }
+
+/* === Global Cross-Device Alignment & Zero-Overflow Protection === */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Prevent any flex or grid child from pushing buttons outside the screen on iOS/Android */
+.flex > *,
+.grid > * {
+  min-width: 0;
+}
+
+/* Keep native inputs & selects strictly inside their parent container */
+input[type="text"],
+input[type="date"],
+input[type="time"],
+input[type="number"],
+input[type="password"],
+select,
+textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Normalize native iOS color picker so it aligns dead-level with inputs and buttons */
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 2px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.5rem;
+}
+
+/* Align all inline forms & action rows cleanly with uniform heights */
+form.flex {
+  align-items: center;
+  max-width: 100%;
+}
+form.flex > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+form.flex > select,
+form.flex > button {
+  min-height: 2.5rem;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+form.flex > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Keep floating bottom pill perfectly centered and bounded on all screen sizes */
+#app-bottom-nav {
+  width: calc(100% - 24px);
+  max-width: 32rem;
+  left: 0 !important;
+  right: 0 !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+#app-bottom-nav button {
+  min-width: 0;
+  overflow: hidden;
+}
+#app-bottom-nav button span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keep modals safely within viewport on narrow screens */
+#app-modal-backdrop > div {
+  max-width: min(24rem, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
