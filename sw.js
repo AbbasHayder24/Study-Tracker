@@ -1,7 +1,7 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v29';
+const APP_CACHE = 'study-tracker-shell-v42';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
@@ -10,7 +10,7 @@ const CORE_ASSETS = [
   './index.html',
   './manifest.json',
   './image.png',
-  './css/styles.css?v=29'
+  './css/styles.css?v=42'
 ];
 
 self.addEventListener('install', (event) => {
@@ -40,6 +40,22 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.includes('__study_tracker_push_meta__')) return;
+  
+  // Network-First for HTML pages so updates on GitHub appear immediately
+  if (req.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/')) {
+    event.respondWith(
+      fetch(req)
+      .then((res) => {
+        if (res && res.ok && res.type === 'basic') {
+          const clone = res.clone();
+          caches.open(APP_CACHE).then((c) => c.put(req, clone).catch(() => {}));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req))
+    );
+    return;
+  }
   
   event.respondWith(
     caches.open(APP_CACHE).then((cache) =>
