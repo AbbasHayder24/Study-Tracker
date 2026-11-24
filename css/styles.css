@@ -1,4 +1,4 @@
-/* styles.css — Liquid Glass Classic Theme (Zero CDN, Instant Boot) */
+/* styles.css — Liquid Glass Theme (Zero CDN, Instant Boot) */
 *, ::before, ::after { box-sizing: border-box; border: 0 solid rgba(255, 255, 255, 0.45); }
 html {
   line-height: 1.5;
@@ -555,8 +555,24 @@ input[type="password"],
 select,
 textarea {
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
+
+/* Fix iOS Safari native time/date picker overflow & enforce exact container width */
+input[type="time"],
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  min-height: 2.5rem;
+  overflow: hidden;
+}
+.items-end { align-items: flex-end; }
 
 /* Normalize native iOS color picker so it aligns dead-level with inputs and buttons */
 input[type="color"] {
