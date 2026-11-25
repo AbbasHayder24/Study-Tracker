@@ -2,8 +2,11 @@
  * challenge.js — Challenge tab: summary dashboard, customizable challenge editor, dynamic day log, and reviews (EN/AR)
  */
 window.ChallengeModule = (function () {
-  let previewPenalty = false;
   let subView = 'summary';
+  try {
+    const savedSub = localStorage.getItem('study_tracker_challenge_subview');
+    if (savedSub === 'summary' || savedSub === 'log' || savedSub === 'reviews') subView = savedSub;
+  } catch (e) {}
   let selectedWeek = 'all';
 
   function t(key, vars) {
@@ -63,7 +66,7 @@ window.ChallengeModule = (function () {
             </div>
             <div>
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">${t('penaltyLimitLabel')}</label>
-              <input id="ch-edit-penalty" type="number" min="1" max="100" step="1" value="${cfg.penaltyThresholdHours}" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"/>
+              <input id="ch-edit-penalty" type="number" min="0" max="100" step="0.5" value="${cfg.penaltyThresholdHours}" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"/>
             </div>
           </div>
 
@@ -108,7 +111,7 @@ window.ChallengeModule = (function () {
       document.getElementById('ch-edit-weeks').value = C.CHALLENGE.TOTAL_WEEKS;
       document.getElementById('ch-edit-flex').value = C.CHALLENGE.WEEKLY_FLEX_HOURS;
       document.getElementById('ch-edit-grace').value = C.CHALLENGE.DAILY_GRACE_HOURS;
-      document.getElementById('ch-edit-penalty').value = C.CHALLENGE.PENALTY_THRESHOLD_HOURS;
+      document.getElementById('ch-edit-penalty').value = 0;
       document.querySelectorAll('.ch-dow-input').forEach(inp => {
         const dow = Number(inp.getAttribute('data-ch-dow'));
         inp.value = C.CHALLENGE.DAILY_TARGETS[dow];
@@ -122,7 +125,8 @@ window.ChallengeModule = (function () {
       const newWeeks = Math.max(1, Math.min(52, Math.round(Number(document.getElementById('ch-edit-weeks').value) || C.CHALLENGE.TOTAL_WEEKS)));
       const newFlex = Math.max(0, Number(document.getElementById('ch-edit-flex').value) || 0);
       const newGrace = Math.max(0, Number(document.getElementById('ch-edit-grace').value) || 0);
-      const newPenalty = Math.max(1, Number(document.getElementById('ch-edit-penalty').value) || C.CHALLENGE.PENALTY_THRESHOLD_HOURS);
+      const rawPen = Number(document.getElementById('ch-edit-penalty').value);
+      const newPenalty = Number.isFinite(rawPen) && rawPen >= 0 ? Math.min(100, rawPen) : 0;
 
       const newTargets = {};
       document.querySelectorAll('.ch-dow-input').forEach(inp => {
@@ -169,7 +173,7 @@ window.ChallengeModule = (function () {
 
     return `
       <div class="space-y-3">
-        ${(() => { const list = [...(ledger.pendingPenalties || [])]; if (previewPenalty) list.unshift({ key: '__preview_penalty__', label: 'W1-W2', deficit: 2.5, isPreview: true }); return list.length > 0 ? list.map(p => {
+        ${(() => { const list = [...(ledger.pendingPenalties || [])]; return list.length > 0 ? list.map(p => {
           const ar = !!(window.I18n && window.I18n.isRTL());
           const hrsTxt = window.AppUI.formatHours(p.deficit);
           const msg = ar
@@ -197,9 +201,6 @@ window.ChallengeModule = (function () {
               <p class="text-[11px] text-slate-400">${window.AppUI.formatDate(ledger.startDate)} – ${window.AppUI.formatDate(ledger.endDate)}</p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-              <button id="test-penalty-btn" type="button" class="px-2 py-1 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" title="${(window.I18n && window.I18n.isRTL()) ? 'تجربة ظهور العقوبة' : 'Preview Penalty'}">
-                🧪
-              </button>
               <button id="edit-challenge-btn" type="button" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                 ⚙️ ${t('edit')}
               </button>
@@ -350,6 +351,7 @@ window.ChallengeModule = (function () {
     document.querySelectorAll('[data-ch-sub]').forEach(btn => {
       btn.onclick = () => {
         subView = btn.getAttribute('data-ch-sub');
+        try { localStorage.setItem('study_tracker_challenge_subview', subView); } catch (e) {}
         rerender();
       };
     });
@@ -402,14 +404,6 @@ window.ChallengeModule = (function () {
       };
     });
 
-    const testPenBtn = document.getElementById('test-penalty-btn');
-    if (testPenBtn) {
-      testPenBtn.onclick = () => {
-        previewPenalty = !previewPenalty;
-        rerender();
-      };
-    }
-
     document.querySelectorAll('[data-confirm-penalty]').forEach(btn => {
       btn.onclick = () => {
         const key = btn.getAttribute('data-confirm-penalty');
@@ -423,11 +417,7 @@ window.ChallengeModule = (function () {
           confirmText: ar ? 'نعم، نفّذتها' : 'Yes, Applied',
           danger: true,
           onConfirm: () => {
-            if (key === '__preview_penalty__') {
-              previewPenalty = false;
-            } else {
-              window.LedgerEngine.resolvePenalty(key);
-            }
+            window.LedgerEngine.resolvePenalty(key);
             window.AppUI.showToast(ar ? 'تم تأكيد تنفيذ العقوبة وإغلاق التنبيه' : 'Penalty confirmed & cleared', 'success');
             rerender();
           }

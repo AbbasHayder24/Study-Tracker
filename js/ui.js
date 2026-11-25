@@ -106,6 +106,7 @@ window.AppUI = (function () {
   }
 
   let toastTimer = null;
+  let toastHideTimer = null;
   function showToast(message, type = 'info') {
     const el = document.getElementById('app-toast');
     if (!el) return;
@@ -115,13 +116,14 @@ window.AppUI = (function () {
       warning: 'bg-amber-500 text-white',
       danger: 'bg-rose-600 text-white'
     };
+    if (toastTimer) clearTimeout(toastTimer);
+    if (toastHideTimer) clearTimeout(toastHideTimer);
     el.className = `fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all duration-200 max-w-[90vw] text-center ${colors[type] || colors.info}`;
     el.textContent = message;
     el.classList.remove('hidden', 'opacity-0');
-    if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
       el.classList.add('opacity-0');
-      setTimeout(() => el.classList.add('hidden'), 200);
+      toastHideTimer = setTimeout(() => el.classList.add('hidden'), 200);
     }, 2800);
   }
 

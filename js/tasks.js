@@ -33,7 +33,7 @@ window.TasksModule = (function () {
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-base font-bold text-slate-800 dark:text-slate-100">${t('studyTasks')}</h2>
-            <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            <span id="task-done-summary" class="text-xs font-medium px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
               ${t('doneSummary', { done: doneCount, total, rate })}
             </span>
           </div>
@@ -151,6 +151,20 @@ window.TasksModule = (function () {
             if (titleEl) {
               titleEl.classList.toggle('line-through', task.done);
               titleEl.classList.toggle('text-slate-400', task.done);
+              titleEl.classList.toggle('text-slate-800', !task.done);
+              titleEl.classList.toggle('dark:text-slate-100', !task.done);
+            }
+            const allTasks = window.AppState.getData().tasks;
+            const total = allTasks.length;
+            const doneCount = allTasks.filter(tk => tk.done).length;
+            const rate = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+            const sumEl = document.getElementById('task-done-summary');
+            if (sumEl) sumEl.textContent = t('doneSummary', { done: doneCount, total, rate });
+            const stEl = document.getElementById('task-filter-status');
+            if (stEl && stEl.options && stEl.options.length >= 3) {
+              stEl.options[0].textContent = t('allCount', { n: total });
+              stEl.options[1].textContent = t('pendingCount', { n: total - doneCount });
+              stEl.options[2].textContent = t('completedCount', { n: doneCount });
             }
             if (window.StudyApp && window.StudyApp.markOtherTabsDirty) window.StudyApp.markOtherTabsDirty();
           } else {

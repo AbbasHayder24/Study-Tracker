@@ -83,7 +83,12 @@ window.AppState = (function () {
   data = createDefaultState();
   let ledgerDirty = true;
   let cachedLedger = null;
+  const VALID_TABS = new Set(['focus', 'tasks', 'habits', 'stats', 'challenge', 'settings']);
   let activeTab = 'focus';
+  try {
+    const savedTab = localStorage.getItem('study_tracker_active_tab');
+    if (savedTab && VALID_TABS.has(savedTab)) activeTab = savedTab;
+  } catch (e) {}
   let isDark = false;
   let syncStatus = { state: 'idle', lastSyncedAt: null, lastError: '' };
 
@@ -536,7 +541,11 @@ window.AppState = (function () {
   }
 
   function getIsDark() { return isDark; }
-  function setActiveTab(tab) { activeTab = tab; }
+  function setActiveTab(tab) {
+    if (!VALID_TABS.has(tab)) return;
+    activeTab = tab;
+    try { localStorage.setItem('study_tracker_active_tab', tab); } catch (e) {}
+  }
   function getActiveTab() { return activeTab; }
 
   return {

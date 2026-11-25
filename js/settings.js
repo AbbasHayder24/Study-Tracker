@@ -68,6 +68,35 @@ window.SettingsModule = (function () {
           </div>
         </div>
 
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
+          <div class="flex items-center gap-1.5">
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('notifSoundTitle')}</h3>
+            ${window.AppUI.infoButtonHtml('info-notif-btn')}
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="setting-toggle-sound" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold ${settings.soundEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
+              ${settings.soundEnabled ? t('soundOn') : t('soundOff')}
+            </button>
+            <button id="setting-test-sound" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
+              ${t('testChime')}
+            </button>
+          </div>
+          <button id="setting-enable-notif" type="button" class="w-full py-2.5 px-3 rounded-xl text-xs font-bold ${notifGranted ? 'bg-emerald-600 text-white' : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'}">
+            ${notifGranted ? t('notifActive') : t('enableNotif')}
+          </button>
+          <div class="pt-2 border-t border-slate-100 dark:border-slate-700 space-y-2">
+            <div class="text-[11px] font-bold text-slate-600 dark:text-slate-300">${t('pushSectionLabel')}</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="setting-toggle-push" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold ${pushActive ? 'bg-emerald-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}">
+                ${pushActive ? t('pushActiveBtn') : t('pushEnableBtn')}
+              </button>
+              <button id="setting-test-push" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
+                ${t('pushTestBtn')}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${isAr() ? '☁️ المزامنة بحساب Google' : '☁️ Google Account Sync'}</h3>
@@ -257,6 +286,32 @@ window.SettingsModule = (function () {
         window.I18n.setLang('ar', true, true);
         window.AppState.markLedgerDirty();
         rerender();
+      };
+    }
+
+    const infoNotifBtn = document.getElementById('info-notif-btn');
+    if (infoNotifBtn) {
+      infoNotifBtn.onclick = () => {
+        window.AppUI.showInfo(t('notifSoundTitle'), t('notifInfoBody'));
+      };
+    }
+
+    const soundToggle = document.getElementById('setting-toggle-sound');
+    if (soundToggle) {
+      soundToggle.onclick = () => {
+        const data = window.AppState.getData();
+        data.settings.soundEnabled = !data.settings.soundEnabled;
+        window.AppState.save();
+        if (data.settings.soundEnabled) window.AppUI.playChime();
+        rerender();
+      };
+    }
+
+    const testSoundBtn = document.getElementById('setting-test-sound');
+    if (testSoundBtn) {
+      testSoundBtn.onclick = () => {
+        window.AppUI.playChime();
+        window.AppUI.showToast(t('chimePlayed'), 'info');
       };
     }
 
@@ -474,16 +529,20 @@ window.SettingsModule = (function () {
             const updateBooks = !!(document.getElementById('edit-subj-update-books') && document.getElementById('edit-subj-update-books').checked);
             if (!newName) return;
 
+            const prevColor = subj.color;
             subj.name = newName;
             subj.color = newColor;
             if (newTagId) subj.defaultTagId = newTagId;
             else delete subj.defaultTagId;
 
-            if (updateBooks && Array.isArray(data.focusSessions)) {
-              data.focusSessions.forEach(sess => {
-                if (sess && sess.subjectId === subj.id) {
-                  sess.color = newColor;
-                  sess.subjectName = newName;
+            if (Array.isArray(data.books)) {
+              data.books.forEach(bk => {
+                if (bk && bk.subjectId === subj.id) {
+                  if (updateBooks) {
+                    delete bk.subjectColor;
+                  } else if (!bk.subjectColor && prevColor && prevColor !== newColor) {
+                    bk.subjectColor = prevColor;
+                  }
                 }
               });
             }

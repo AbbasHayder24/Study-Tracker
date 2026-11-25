@@ -238,7 +238,7 @@ window.FocusModule = (function () {
     if (!isRunning || isPaused) return;
     const elapsed = getLiveElapsedSec();
     if (mode === 'pomodoro' && elapsed >= totalSec) {
-      finishSession(true, rerender || lastRerender);
+      finishSession(true, rerender || lastRerender, true);
       return;
     }
     updateLiveClockDOM();
@@ -308,15 +308,19 @@ window.FocusModule = (function () {
     if (!isRunning) return;
     const elapsed = getLiveElapsedSec();
     if (mode === 'stopwatch') {
-      finishSession((elapsed / 60) >= 5, rerender);
+      finishSession((elapsed / 60) >= 5, rerender, false);
     } else {
       const completed = targetMinutes === 0 ? elapsed >= 5 : (elapsed / 60) >= 5;
-      finishSession(completed, rerender);
+      const reachedEnd = totalSec > 0 && elapsed >= totalSec;
+      finishSession(completed, rerender, reachedEnd);
     }
   }
 
-  function finishSession(completed, rerender) {
-    const finalElapsed = mode === 'pomodoro' && completed ? totalSec : getLiveElapsedSec();
+  function finishSession(completed, rerender, naturalFinish = false) {
+    const liveElapsed = getLiveElapsedSec();
+    const finalElapsed = (mode === 'pomodoro' && naturalFinish)
+      ? totalSec
+      : (mode === 'pomodoro' && totalSec > 0 ? Math.min(totalSec, liveElapsed) : liveElapsed);
     const finishedId = sessionId || ('bk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
 
     if (intervalId) {

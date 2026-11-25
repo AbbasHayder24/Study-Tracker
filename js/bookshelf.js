@@ -238,7 +238,7 @@ window.BookshelfModule = (function () {
     // Flush on the shelf (yTop + h === svgH) so books never float above the board
     const yTop = svgH - h;
     const tagColor = tag ? tag.color : '#6366f1';
-    const subjColor = subj ? subj.color : null;
+    const subjColor = book.subjectColor || (subj ? subj.color : null);
     const isGold = !!lvl.gold;
     const isIncomplete = lvl.id === 'incomplete';
     const safeId = String(book.id || 'bk').replace(/[^a-zA-Z0-9_-]/g, '');
@@ -459,11 +459,12 @@ window.BookshelfModule = (function () {
     const selectAllBtn = document.getElementById('shelf-select-all');
     if (selectAllBtn) {
       selectAllBtn.onclick = () => {
-        const allBooks = window.AppState.getData().books;
-        if (selectedIds.size === allBooks.length) {
+        const visibleBooks = filterBooksByPeriod(window.AppState.getData().books || [], shelfPeriod);
+        const allVisibleSelected = visibleBooks.length > 0 && visibleBooks.every(b => selectedIds.has(b.id));
+        if (allVisibleSelected) {
           selectedIds.clear();
         } else {
-          selectedIds = new Set(allBooks.map(b => b.id));
+          selectedIds = new Set(visibleBooks.map(b => b.id));
         }
         if (onChanged) onChanged();
       };
@@ -514,7 +515,7 @@ window.BookshelfModule = (function () {
     toRemove.forEach(b => {
       const tag = window.AppUI.getTagById(b.tagId);
       if (b.completed && tag && tag.countsForChallenge) {
-        window.LedgerEngine.addStudyMinutesToDate(b.date, -b.minutes);
+        window.LedgerEngine.addStudyMinutesToDate(b.date, -b.minutes, true);
       }
     });
     data.books = data.books.filter(b => !idSet.has(b.id));
@@ -634,16 +635,17 @@ window.BookshelfModule = (function () {
 
       if (book.completed) {
         if (oldTag && oldTag.countsForChallenge) {
-          window.LedgerEngine.addStudyMinutesToDate(book.date, -book.minutes);
+          window.LedgerEngine.addStudyMinutesToDate(book.date, -book.minutes, true);
         }
         if (newTag && newTag.countsForChallenge) {
-          window.LedgerEngine.addStudyMinutesToDate(newDate, book.minutes);
+          window.LedgerEngine.addStudyMinutesToDate(newDate, book.minutes, true);
         }
       }
 
       book.date = newDate;
       book.tagId = newTagId;
       book.subjectId = newSubjectId;
+      delete book.subjectColor;
       book.taskTitle = newTaskTitle;
       book.taskId = newTaskId;
       window.AppState.markLedgerDirty();

@@ -26,7 +26,9 @@ window.LedgerEngine = (function () {
     const dailyGraceHours = Number.isFinite(Number(custom.dailyGraceHours)) && Number(custom.dailyGraceHours) >= 0
       ? Number(custom.dailyGraceHours)
       : C.CHALLENGE.DAILY_GRACE_HOURS;
-    const penaltyThresholdHours = 0;
+    const penaltyThresholdHours = (custom.penaltyThresholdHours !== undefined && Number.isFinite(Number(custom.penaltyThresholdHours)) && Number(custom.penaltyThresholdHours) >= 0)
+      ? Number(custom.penaltyThresholdHours)
+      : 0;
     const name = typeof custom.name === 'string' ? custom.name.trim() : '';
 
     return {
@@ -234,7 +236,7 @@ window.LedgerEngine = (function () {
       const endWeek = w2 || w1;
       const lastDay = endWeek && endWeek.days && endWeek.days[endWeek.days.length - 1];
       const periodFullyEnded = !!(lastDay && !lastDay.isFuture && !lastDay.isToday);
-      if (periodFullyEnded && endWeek.deficitAfter > 0) {
+      if (periodFullyEnded && endWeek.deficitAfter > cfg.penaltyThresholdHours) {
         const pKey = `bw_${bwIdx + 1}_${endWeek.endDate}`;
         if (!resolvedPenalties[pKey]) {
           pendingPenalties.push({
