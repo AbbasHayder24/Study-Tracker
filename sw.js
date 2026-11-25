@@ -1,7 +1,7 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v64';
+const APP_CACHE = 'study-tracker-shell-v65';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
@@ -10,14 +10,14 @@ const CORE_ASSETS = [
   './index.html',
   './manifest.json',
   './image.png',
-  './css/styles.css?v=64',
-  './js/bookshelf.js?v=64',
-  './js/focus.js?v=64',
-  './js/stats.js?v=64',
-  './js/reviews.js?v=64',
-  './js/groups.js?v=64',
-  './js/challenge.js?v=64',
-  './js/settings.js?v=64'
+  './css/styles.css?v=65',
+  './js/bookshelf.js?v=65',
+  './js/focus.js?v=65',
+  './js/stats.js?v=65',
+  './js/reviews.js?v=65',
+  './js/groups.js?v=65',
+  './js/challenge.js?v=65',
+  './js/settings.js?v=65'
 ];
 
 self.addEventListener('install', (event) => {

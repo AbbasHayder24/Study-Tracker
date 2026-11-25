@@ -31,6 +31,8 @@ window.GoogleSync = (function () {
   let queuedSilent = true;
   let pushDebounce = null;
   const PRE_SYNC_BACKUP_KEY = 'study_tracker_pre_sync_backup_v1';
+  const LAST_SYNCED_SIG_KEY = 'study_tracker_last_synced_sig_v1';
+  let conflictModalOpen = false;
   let signingIn = false;
 
   function isAr() {
@@ -241,6 +243,112 @@ window.GoogleSync = (function () {
     }
   }
 
+  function getLastSyncedSig() {
+    try {
+      const raw = localStorage.getItem(LAST_SYNCED_SIG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function setLastSyncedSig(uid, sig) {
+    try {
+      localStorage.setItem(LAST_SYNCED_SIG_KEY, JSON.stringify({ uid, sig, at: Date.now() }));
+    } catch (e) {}
+  }
+
+  function summarizeDataset(d) {
+    const obj = d && typeof d === 'object' ? d : {};
+    const books = Array.isArray(obj.books) ? obj.books.filter(b => b && b.completed).length : 0;
+    const logsObj = obj.dailyLogs && typeof obj.dailyLogs === 'object' ? obj.dailyLogs : {};
+    let hours = 0;
+    let days = 0;
+    Object.keys(logsObj).forEach(k => {
+      const h = Number(logsObj[k] && logsObj[k].hours) || 0;
+      if (h > 0) { hours += h; days++; }
+    });
+    hours = Math.round(hours * 10) / 10;
+    let updatedTxt = '—';
+    const ts = Number(obj.updatedAt) || 0;
+    if (ts > 0) {
+      try {
+        updatedTxt = new Date(ts).toLocaleString(isAr() ? 'ar-IQ' : [], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch (e) {}
+    }
+    return { books, hours, days, updatedTxt };
+  }
+
+  function openSyncChoiceModal(localData, remoteDataObj) {
+    return new Promise((resolve) => {
+      if (!window.AppUI || conflictModalOpen) {
+        resolve('cancel');
+        return;
+      }
+      conflictModalOpen = true;
+      const ar = isAr();
+      const loc = summarizeDataset(localData);
+      const rem = summarizeDataset(remoteDataObj);
+      const hU = ar ? 'س' : 'h';
+      const bkU = ar ? 'كتاب' : 'books';
+      const dU = ar ? 'يوم' : 'days';
+
+      const finish = (choice) => {
+        conflictModalOpen = false;
+        window.AppUI.closeModal();
+        resolve(choice);
+      };
+
+      window.AppUI.openModal({
+        title: ar ? '⚖️ اختر البيانات التي تريد حفظها' : '⚖️ Choose Which Data to Keep',
+        bodyHtml: `
+          <div class="space-y-3">
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              ${ar
+                ? 'تم العثور على بيانات مختلفة بين هذا الجهاز وحساب Google. لم يتم تعديل أو حذف أي شيء بعد — اختر النسخة التي تريد اعتمادها:'
+                : 'Different study data was found on this device vs Google Cloud. Nothing has been overwritten yet — choose how to proceed:'}
+            </p>
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-1">
+                <div class="text-xs font-extrabold text-slate-800 dark:text-slate-100">📱 ${ar ? 'هذا الجهاز' : 'This Device'}</div>
+                <div class="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">${loc.hours}${hU}</div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400">${loc.books} ${bkU} • ${loc.days} ${dU}</div>
+                <div class="text-[9px] text-slate-400">${loc.updatedTxt}</div>
+              </div>
+              <div class="p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-900/30 border border-indigo-200/60 dark:border-indigo-800/50 space-y-1">
+                <div class="text-xs font-extrabold text-indigo-700 dark:text-indigo-300">☁️ ${ar ? 'السحابة' : 'Google Cloud'}</div>
+                <div class="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">${rem.hours}${hU}</div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400">${rem.books} ${bkU} • ${rem.days} ${dU}</div>
+                <div class="text-[9px] text-slate-400">${rem.updatedTxt}</div>
+              </div>
+            </div>
+            <div class="space-y-2 pt-1">
+              <button id="sync-pick-cloud" type="button" class="w-full py-2.5 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">
+                ☁️ ${ar ? 'اعتماد بيانات السحابة (سحب لهذا الجهاز)' : 'Keep Cloud Data (Pull to This Device)'}
+              </button>
+              <button id="sync-pick-local" type="button" class="w-full py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold">
+                📱 ${ar ? 'اعتماد بيانات هذا الجهاز (رفع للسحابة)' : 'Keep This Device (Upload to Cloud)'}
+              </button>
+              <button id="sync-pick-merge" type="button" class="w-full py-2.5 px-3 rounded-xl bg-emerald-600 text-white text-xs font-bold">
+                🔀 ${ar ? 'دمج النسختين معاً (بدون حذف)' : 'Merge Both Datasets Together'}
+              </button>
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button id="sync-pick-cancel" type="button" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إلغاء (لا تغيّر شيئاً)' : 'Cancel (Keep Unchanged)'}</button>
+        `
+      });
+
+      const bCloud = document.getElementById('sync-pick-cloud');
+      const bLocal = document.getElementById('sync-pick-local');
+      const bMerge = document.getElementById('sync-pick-merge');
+      const bCancel = document.getElementById('sync-pick-cancel');
+      if (bCloud) bCloud.onclick = () => finish('cloud');
+      if (bLocal) bLocal.onclick = () => finish('local');
+      if (bMerge) bMerge.onclick = () => finish('merge');
+      if (bCancel) bCancel.onclick = () => finish('cancel');
+    });
+  }
+
   async function writeCloudPayload(payload, prevRemoteData = null, prevBackup = null) {
     const docData = {
       payload,
@@ -307,27 +415,75 @@ window.GoogleSync = (function () {
       }
 
       const remoteWeight = countStudyWeight(remoteDataObj);
+      const lastSynced = getLastSyncedSig();
+      const sameAccountBase = !!(lastSynced && lastSynced.uid === currentUser.uid && lastSynced.sig);
 
-      // STRICT READ-ONLY PULL: If this device has NO study data and cloud HAS data,
-      // pull cloud directly and DO NOT write anything back to Firestore!
-      if (!explicitReset && localWeight === 0 && remoteWeight > 0) {
-        window.AppState.replaceData(remoteDataObj, false, true);
+      // Already 100% identical — nothing to write or ask
+      if (remoteExists && localSnap === remoteSnap) {
+        setLastSyncedSig(currentUser.uid, localSnap);
         pendingPush = false;
         updateStatus({ state: 'ok', lastSyncedAt: Date.now(), lastError: '' });
-        if (window.GroupsModule && window.GroupsModule.syncMyPresence) {
-          window.GroupsModule.syncMyPresence(false);
-        }
         if (!silent && window.AppUI) {
-          window.AppUI.showToast(
-            isAr() ? 'تم سحب جميع بياناتك من حساب Google بأمان ☁️' : 'Pulled all your data safely from Google ☁️',
-            'success'
-          );
+          window.AppUI.showToast(isAr() ? 'بياناتك متطابقة ومحدّثة ☁️' : 'Already synced & up to date ☁️', 'success');
         }
+        return { ok: true, updated: false };
+      }
+
+      // Detect if user choice is needed:
+      // 1) First sync on this device for this account when local & cloud differ (and at least one has study data)
+      // 2) True divergence: BOTH local and cloud changed independently since last sync
+      const localDiverged = sameAccountBase ? (localSnap !== lastSynced.sig) : (localWeight > 0);
+      const remoteDiverged = sameAccountBase ? (remoteSnap !== lastSynced.sig) : (remoteWeight > 0);
+      const needsChoice = !explicitReset && remoteExists && localSnap !== remoteSnap && (
+        (!sameAccountBase && (localWeight > 0 || remoteWeight > 0)) ||
+        (localDiverged && remoteDiverged)
+      );
+
+      let chosenAction = 'auto';
+      if (needsChoice) {
+        chosenAction = await openSyncChoiceModal(localData, remoteDataObj);
+        if (chosenAction === 'cancel') {
+          updateStatus({ state: 'idle', lastError: '' });
+          return { ok: false, cancelled: true };
+        }
+      }
+
+      if (chosenAction === 'cloud') {
+        saveLocalPreSyncBackup(localData);
+        window.AppState.replaceData(remoteDataObj, false, true);
+        const newSnap = stableSnapshot(window.AppState.getData());
+        setLastSyncedSig(currentUser.uid, newSnap);
+        pendingPush = false;
+        updateStatus({ state: 'ok', lastSyncedAt: Date.now(), lastError: '' });
+        if (window.GroupsModule && window.GroupsModule.syncMyPresence) window.GroupsModule.syncMyPresence(false);
+        if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
+        if (window.AppUI) window.AppUI.showToast(isAr() ? 'تم اعتماد وسحب بيانات السحابة ☁️' : 'Cloud data applied ☁️', 'success');
         return { ok: true, updated: true };
       }
 
+      if (chosenAction === 'local') {
+        const payload = JSON.parse(JSON.stringify(localData));
+        payload.updatedAt = Math.max(Number(payload.updatedAt) || 0, Date.now());
+        window.AppState.getData().updatedAt = payload.updatedAt;
+        window.AppState.save(false, true);
+        await writeCloudPayload(payload, remoteDataObj, prevCloudBackup);
+        setLastSyncedSig(currentUser.uid, stableSnapshot(window.AppState.getData()));
+        pendingPush = false;
+        updateStatus({ state: 'ok', lastSyncedAt: Date.now(), lastError: '' });
+        if (window.GroupsModule && window.GroupsModule.syncMyPresence) window.GroupsModule.syncMyPresence(false);
+        if (window.AppUI) window.AppUI.showToast(isAr() ? 'تم اعتماد ورفع بيانات هذا الجهاز 📱' : 'Device data uploaded 📱', 'success');
+        return { ok: true, updated: false };
+      }
+
+      // 'merge' or normal non-conflicting 'auto' sync
       if (remoteExists) {
         if (explicitReset) {
+          merged = localData;
+        } else if (chosenAction === 'auto' && sameAccountBase && !localDiverged && remoteDiverged) {
+          // Only cloud changed since last sync -> pull cloud cleanly
+          merged = remoteDataObj;
+        } else if (chosenAction === 'auto' && sameAccountBase && localDiverged && !remoteDiverged) {
+          // Only local changed since last sync -> keep local cleanly
           merged = localData;
         } else if (typeof window.AppState.mergeData === 'function') {
           merged = window.AppState.mergeData(localData, remoteDataObj);
@@ -338,7 +494,7 @@ window.GoogleSync = (function () {
         }
       }
 
-      // Layer 1: Anti-Wipe Guard — never let an empty state overwrite non-empty study data unless explicitly reset
+      // Anti-Wipe Guard
       let mergedWeight = countStudyWeight(merged);
       if (!explicitReset && mergedWeight === 0 && (remoteWeight > 0 || localWeight > 0)) {
         merged = remoteWeight >= localWeight ? remoteDataObj : localData;
@@ -357,7 +513,6 @@ window.GoogleSync = (function () {
       if (remoteChanged) {
         const payload = JSON.parse(JSON.stringify(window.AppState.getData()));
         const payloadWeight = countStudyWeight(payload);
-        // Never overwrite non-empty cloud with empty payload unless explicitReset
         if (explicitReset || payloadWeight > 0 || remoteWeight === 0) {
           payload.updatedAt = Math.max(Number(payload.updatedAt) || 0, Date.now());
           window.AppState.getData().updatedAt = payload.updatedAt;
@@ -365,6 +520,11 @@ window.GoogleSync = (function () {
           await writeCloudPayload(payload, remoteDataObj, prevCloudBackup);
           if (explicitReset && typeof window !== 'undefined') window.__studyTrackerExplicitReset = false;
         }
+      }
+
+      setLastSyncedSig(currentUser.uid, stableSnapshot(window.AppState.getData()));
+      if (chosenAction === 'merge' && window.StudyApp && window.StudyApp.renderAll) {
+        window.StudyApp.renderAll();
       }
 
       pendingPush = false;
@@ -496,6 +656,7 @@ window.GoogleSync = (function () {
       currentUser = null;
       try {
         localStorage.removeItem('study_tracker_google_uid');
+        localStorage.removeItem(LAST_SYNCED_SIG_KEY);
         sessionStorage.removeItem('study_tracker_google_redirect');
       } catch (e) {}
       updateStatus({ state: 'idle', lastSyncedAt: null, lastError: '' });

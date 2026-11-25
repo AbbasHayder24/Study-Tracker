@@ -3,7 +3,7 @@
  * bilingual EN/AR toggle, header sync indicator, auto-sync on resume/online, 6-tab navigation
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '64';
+  const ASSET_VER = '65';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },
