@@ -255,15 +255,54 @@ window.FocusModule = (function () {
     intervalId = setInterval(() => tickCheck(lastRerender), 1000);
   }
 
-  function buildScheduledPushMeta() {
+  function buildRichNotificationMeta(mins, alreadyLogged = false) {
+    const ar = isAr();
+    const C = window.APP_CONFIG;
     const tag = window.AppUI ? window.AppUI.getTagById(selectedTagId) : null;
+    const data = window.AppState ? window.AppState.getData() : null;
+    const linkedTask = (linkType === 'task' && selectedTaskId && data)
+      ? (data.tasks || []).find(tk => tk.id === selectedTaskId)
+      : null;
+    const subjId = linkType === 'subject' ? selectedSubjectId : (linkedTask ? linkedTask.subjectId : '');
+    const subj = subjId && window.AppUI ? window.AppUI.getSubjectById(subjId) : null;
+    const cleanTag = tag && tag.name ? String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim() : '';
+    const label = (subj && subj.name) || cleanTag || (ar ? 'جلسة دراسة' : 'Study Session');
+
+    const roundedM = Math.max(1, Math.round(mins));
+    let lvl = C.BOOK_LEVELS[1];
+    for (let i = 1; i < C.BOOK_LEVELS.length; i++) {
+      if (roundedM >= C.BOOK_LEVELS[i].minMinutes && roundedM <= C.BOOK_LEVELS[i].maxMinutes) {
+        lvl = C.BOOK_LEVELS[i];
+        break;
+      }
+    }
+    const lvlName = ar ? (lvl.labelAr || lvl.label) : lvl.label;
+    const counts = !!(tag && tag.countsForChallenge);
+    const todaySum = window.LedgerEngine ? window.LedgerEngine.getTodaySummary() : { logged: 0, target: 5.5 };
+    const projectedLogged = alreadyLogged
+      ? todaySum.logged
+      : (todaySum.logged + (counts ? Math.round((roundedM / 60) * 100) / 100 : 0));
+    const fmtH = (v) => (window.AppUI ? window.AppUI.formatHours(v) : String(v));
+
+    const icon = lvl.gold ? '🏆' : '📚';
+    const title = ar
+      ? `${icon} أُضيف ${lvlName} — ${label}`
+      : `${icon} New ${lvlName} — ${label}`;
+
+    const body = counts
+      ? (ar
+          ? `+${roundedM} دقيقة للتحدي • مجموع اليوم: ${fmtH(projectedLogged)} / ${fmtH(todaySum.target)} س 🔥`
+          : `+${roundedM}m for challenge • Today: ${fmtH(projectedLogged)} / ${fmtH(todaySum.target)}h 🔥`)
+      : (ar
+          ? `أنهيت ${roundedM} دقيقة وأُضيفت إلى رف كتبك ✨`
+          : `Completed ${roundedM}m and added to your bookshelf ✨`);
+
+    return { sessionId, title, body };
+  }
+
+  function buildScheduledPushMeta() {
     const mins = targetMinutes === 0 ? 5 : targetMinutes;
-    const counts = tag && tag.countsForChallenge;
-    return {
-      sessionId,
-      title: counts ? t('notifCompleteTitle') : t('notifCompleteShelfTitle'),
-      body: counts ? t('notifCompleteChallenge', { m: mins }) : t('notifCompleteShelf', { m: mins })
-    };
+    return buildRichNotificationMeta(mins, false);
   }
 
   function startTimer(rerender) {
@@ -386,19 +425,15 @@ window.FocusModule = (function () {
       window.LedgerEngine.addStudyMinutesToDate(todayISO, actualMinutes, true);
       window.AppState.save(true, true);
       if (!pushAlreadyFired) {
-        window.AppUI.sendSessionNotification(
-          t('notifCompleteTitle'),
-          t('notifCompleteChallenge', { m: roundedM })
-        );
+        const rich = buildRichNotificationMeta(roundedM, true);
+        window.AppUI.sendSessionNotification(rich.title, rich.body);
       }
       window.AppUI.showToast(t('toastCompleteChallenge', { m: roundedM }), 'success');
     } else if (completed) {
       window.AppState.save(true, true);
       if (!pushAlreadyFired) {
-        window.AppUI.sendSessionNotification(
-          t('notifCompleteShelfTitle'),
-          t('notifCompleteShelf', { m: roundedM })
-        );
+        const rich = buildRichNotificationMeta(roundedM, true);
+        window.AppUI.sendSessionNotification(rich.title, rich.body);
       }
       window.AppUI.showToast(t('toastCompleteShelf'), 'success');
     } else {

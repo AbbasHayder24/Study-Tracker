@@ -1,7 +1,7 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v54';
+const APP_CACHE = 'study-tracker-shell-v55';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
@@ -10,16 +10,16 @@ const CORE_ASSETS = [
   './index.html',
   './manifest.json',
   './image.png',
-  './css/styles.css?v=54',
-  './js/bookshelf.js?v=54',
-  './js/tasks.js?v=54',
-  './js/habits.js?v=54',
-  './js/focus.js?v=54',
-  './js/stats.js?v=54',
-  './js/reviews.js?v=54',
-  './js/groups.js?v=54',
-  './js/challenge.js?v=54',
-  './js/settings.js?v=54'
+  './css/styles.css?v=55',
+  './js/bookshelf.js?v=55',
+  './js/tasks.js?v=55',
+  './js/habits.js?v=55',
+  './js/focus.js?v=55',
+  './js/stats.js?v=55',
+  './js/reviews.js?v=55',
+  './js/groups.js?v=55',
+  './js/challenge.js?v=55',
+  './js/settings.js?v=55'
 ];
 
 self.addEventListener('install', (event) => {
@@ -112,14 +112,25 @@ self.addEventListener('push', (event) => {
     const body = (payload && payload.body) || (saved && saved.body) || 'Your Focus timer has finished. Great work!';
 
     // Safari / iOS strictly requires showing a visible notification on every push event
-    await self.registration.showNotification(title, {
+    const notifOpts = {
       body,
       icon: './image.png',
       badge: './image.png',
       tag: 'study-tracker-timer',
       renotify: true,
+      vibrate: [120, 60, 120],
+      timestamp: Date.now(),
       data: { url: './' }
-    });
+    };
+    try {
+      notifOpts.actions = [
+        { action: 'open', title: '📚 Open App' }
+      ];
+      await self.registration.showNotification(title, notifOpts);
+    } catch (e) {
+      delete notifOpts.actions;
+      await self.registration.showNotification(title, notifOpts);
+    }
   })());
 });
 

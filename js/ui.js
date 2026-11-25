@@ -43,19 +43,25 @@ window.AppUI = (function () {
       unlockAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
-      const notes = [523.25, 659.25, 783.99];
-      notes.forEach((freq, idx) => {
+      // Warm bell-like ascending triad + octave shimmer
+      const notes = [
+        { f: 523.25, t: 0.00, dur: 0.55, vol: 0.14 },
+        { f: 659.25, t: 0.11, dur: 0.58, vol: 0.14 },
+        { f: 783.99, t: 0.22, dur: 0.65, vol: 0.15 },
+        { f: 1046.50, t: 0.34, dur: 0.85, vol: 0.12 }
+      ];
+      notes.forEach(n => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.14);
-        gain.gain.setValueAtTime(0.001, now + idx * 0.14);
-        gain.gain.exponentialRampToValueAtTime(0.18, now + idx * 0.14 + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.42);
+        osc.frequency.setValueAtTime(n.f, now + n.t);
+        gain.gain.setValueAtTime(0.0008, now + n.t);
+        gain.gain.exponentialRampToValueAtTime(n.vol, now + n.t + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0008, now + n.t + n.dur);
         osc.connect(gain);
         gain.connect(audioCtx.destination);
-        osc.start(now + idx * 0.14);
-        osc.stop(now + idx * 0.14 + 0.45);
+        osc.start(now + n.t);
+        osc.stop(now + n.t + n.dur + 0.04);
       });
     } catch (e) {}
   }
@@ -110,21 +116,39 @@ window.AppUI = (function () {
   function showToast(message, type = 'info') {
     const el = document.getElementById('app-toast');
     if (!el) return;
-    const colors = {
-      info: 'bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900',
-      success: 'bg-emerald-600 text-white',
-      warning: 'bg-amber-500 text-white',
-      danger: 'bg-rose-600 text-white'
+    const styles = {
+      info:    { accent: '#4f46e5', icon: '✦' },
+      success: { accent: '#10b981', icon: '✓' },
+      warning: { accent: '#f59e0b', icon: '!' },
+      danger:  { accent: '#f43f5e', icon: '✕' }
     };
+    const cfg = styles[type] || styles.info;
     if (toastTimer) clearTimeout(toastTimer);
     if (toastHideTimer) clearTimeout(toastHideTimer);
-    el.className = `fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all duration-200 max-w-[90vw] text-center ${colors[type] || colors.info}`;
-    el.textContent = message;
-    el.classList.remove('hidden', 'opacity-0');
+
+    el.className = 'glass-toast';
+    el.innerHTML = `
+      <div class="glass-toast-row">
+        <span class="glass-toast-icon" style="background:${cfg.accent}">${cfg.icon}</span>
+        <span class="glass-toast-msg">${escapeHtml(message)}</span>
+      </div>
+      <div class="glass-toast-bar" style="background:${cfg.accent}"></div>
+    `;
+    el.onclick = () => {
+      if (toastTimer) clearTimeout(toastTimer);
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      el.classList.remove('toast-visible');
+      toastHideTimer = setTimeout(() => el.classList.add('hidden'), 220);
+    };
+
+    requestAnimationFrame(() => {
+      el.classList.add('toast-visible');
+    });
+
     toastTimer = setTimeout(() => {
-      el.classList.add('opacity-0');
-      toastHideTimer = setTimeout(() => el.classList.add('hidden'), 200);
-    }, 2800);
+      el.classList.remove('toast-visible');
+      toastHideTimer = setTimeout(() => el.classList.add('hidden'), 260);
+    }, 3000);
   }
 
   function openModal({ title, bodyHtml, footerHtml = '' }) {
