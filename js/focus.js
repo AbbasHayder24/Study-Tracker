@@ -26,11 +26,7 @@ window.FocusModule = (function () {
   let intervalId = null;
   let lastRerender = null;
   let restoredOnce = false;
-  let bottomView = 'shelf'; // 'shelf' | 'group'
-  try {
-    const savedBv = localStorage.getItem('study_tracker_focus_bottom_view');
-    if (savedBv === 'shelf' || savedBv === 'group') bottomView = savedBv;
-  } catch (e) {}
+
 
   const MAX_FOCUS_MINUTES = 360; // 6 hours max
   const DIAL_RADIUS = 84;
@@ -643,6 +639,16 @@ window.FocusModule = (function () {
 
     return `
       <div class="space-y-4">
+        ${(() => {
+          const liveN = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0;
+          if (liveN <= 0) return '';
+          return `
+            <button id="focus-ambient-hall" type="button" class="w-full py-1.5 px-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-900/30 border border-emerald-200/60 dark:border-emerald-800/50 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1.5">
+              <span>🟢</span>
+              <span>${isAr() ? `${liveN} من زملائك يدرسون الآن في القاعة` : `${liveN} studying live in Study Hall`}</span>
+            </button>
+          `;
+        })()}
         <div id="focus-timer-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
           <div class="zen-hide flex items-center justify-between mb-3">
             <div class="flex items-center gap-1.5">
@@ -757,16 +763,7 @@ window.FocusModule = (function () {
           </div>
         </div>
 
-        <div class="zen-hide flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 gap-1">
-          <button type="button" data-focus-bview="shelf" class="flex-1 py-2 px-2 rounded-lg text-xs font-bold transition ${bottomView === 'shelf' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
-            📚 ${isAr() ? 'رف الكتب' : 'Bookshelf'}
-          </button>
-          <button type="button" data-focus-bview="group" class="flex-1 py-2 px-2 rounded-lg text-xs font-bold transition ${bottomView === 'group' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
-            👥 ${isAr() ? 'دراسة معاً' : 'Study Together'}${(() => { const n = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0; return n > 0 ? ` <span class="text-[10px]">🟢${n}</span>` : ''; })()}
-          </button>
-        </div>
-
-        <div class="zen-hide">${bottomView === 'group' && window.GroupsModule ? window.GroupsModule.render() : window.BookshelfModule.renderSection()}</div>
+        <div class="zen-hide">${window.BookshelfModule.renderSection()}</div>
       </div>
     `;
   }
@@ -1029,30 +1026,35 @@ window.FocusModule = (function () {
     const stopBtn = document.getElementById('focus-stop-btn');
     if (stopBtn) stopBtn.onclick = () => stopOrFinish(rerender);
 
-    document.querySelectorAll('[data-focus-bview]').forEach(btn => {
-      btn.onclick = () => {
-        const nextView = btn.getAttribute('data-focus-bview');
-        if (!nextView || nextView === bottomView) return;
-        if (bottomView === 'group' && nextView !== 'group' && window.GroupsModule) {
-          window.GroupsModule.detach();
-        }
-        bottomView = nextView;
-        try { localStorage.setItem('study_tracker_focus_bottom_view', bottomView); } catch (e) {}
-        if (rerender) rerender();
+    const ambBtn = document.getElementById('focus-ambient-hall');
+    if (ambBtn) {
+      ambBtn.onclick = () => {
+        if (zenMode) setZenMode(false);
+        window.AppState.setActiveTab('hall');
+        if (window.StudyApp) window.StudyApp.renderAll(true);
       };
-    });
-
-    if (bottomView === 'group' && window.GroupsModule) {
-      window.GroupsModule.bindEvents(rerender);
-    } else {
-      if (window.GroupsModule) window.GroupsModule.detach();
-      window.BookshelfModule.bindEvents(rerender);
     }
+    window.BookshelfModule.bindEvents(rerender);
+  }
+
+  function startSyncedSprint(mins) {
+    if (isRunning) {
+      window.AppState.setActiveTab('focus');
+      if (window.StudyApp) window.StudyApp.renderAll(true);
+      return;
+    }
+    mode = 'pomodoro';
+    targetMinutes = clampFocusMinutes(mins);
+    totalSec = getConfiguredTotalSec();
+    saveFocusPrefs();
+    window.AppState.setActiveTab('focus');
+    startTimer(() => { if (window.StudyApp) window.StudyApp.renderAll(true); });
   }
 
   return {
     syncFromSettings,
     applyRemoteTimerState,
+    startSyncedSprint,
     render,
     bindEvents
   };

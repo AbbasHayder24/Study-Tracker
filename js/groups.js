@@ -1,30 +1,38 @@
 /**
- * groups.js — YPT-Style Study Groups & Leaderboard via Firebase Firestore
- * Features: Live Study Room with local ticking clocks, Today/Week/Total leaderboard,
- * shared weekly group goal, verified timer-only hours + ghost-timer protection,
- * multi-group switcher (up to 3), nickname & subject privacy, deep-link invites (?join=CODE),
- * owner admin controls, offline cache, and quota-friendly onSnapshot lifecycle.
+ * groups.js — Study Hall (القاعة) — YPT-Style Study Groups & Leaderboard via Firebase Firestore
+ * Features:
+ * - Dedicated Study Hall tab with Live Study Room & colored initials avatars
+ * - Synchronized Group Pomodoro Sprints (1-tap Join synced to exact end time)
+ * - Fair Goal % leaderboard alongside Today / Week / Total + Next Rank gap banner
+ * - Silent Cheers (🔥) with 1-hour cooldown & custom short study status
+ * - Ambient Presence Strip for Focus & Zen Mode
+ * - Multi-group switcher (up to 3), nickname & subject privacy, deep-link invites (?join=CODE), offline cache
  */
 window.GroupsModule = (function () {
   const CACHE_KEY = 'study_tracker_groups_cache_v1';
   const PENDING_JOIN_KEY = 'study_tracker_pending_join_code';
+  const CHEER_COOLDOWN_KEY = 'study_tracker_cheer_cooldowns_v1';
   const MAX_GROUPS = 3;
   const MAX_MEMBERS_PER_GROUP = 30;
-  const MAX_GHOST_TIMER_MS = 6 * 3600 * 1000; // 6 hours max (matches FocusModule)
-  const MAX_DAILY_MINUTES = 960; // 16 hours/day anti-cheat cap
+  const MAX_GHOST_TIMER_MS = 6 * 3600 * 1000;
+  const MAX_DAILY_MINUTES = 960;
 
-  let groupMetaMap = {};      // { [groupId]: metaObj }
-  let groupMembersMap = {};   // { [groupId]: memberObj[] }
-  let groupFetchedAt = {};    // { [groupId]: timestamp }
+  const AVATAR_COLORS = ['#4f46e5', '#0ea5e9', '#10b981', '#f59e0b', '#e11d48', '#7c3aed', '#0d9488', '#d97706'];
+
+  let groupMetaMap = {};
+  let groupMembersMap = {};
+  let groupFetchedAt = {};
   let activeUnsubMeta = null;
   let activeUnsubMembers = null;
+  let activeUnsubCheers = null;
   let activeListenedGroupId = null;
   let liveClockInterval = null;
-  let leaderboardPeriod = 'today'; // 'today' | 'week' | 'total'
+  let leaderboardPeriod = 'today'; // 'today' | 'goal' | 'week' | 'total'
   let presenceTimer = null;
   let lastPresenceSig = '';
   let lastRerenderFn = null;
   let isLoadingGroup = false;
+  let lastSeenCheerAt = Date.now();
 
   function isAr() {
     return !!(window.I18n && window.I18n.isRTL());
@@ -34,7 +42,6 @@ window.GroupsModule = (function () {
     return window.AppUI ? window.AppUI.escapeHtml(s) : String(s || '');
   }
 
-  // Load cached groups from localStorage for instant offline display
   function loadCache() {
     try {
       const raw = localStorage.getItem(CACHE_KEY);
@@ -90,10 +97,9 @@ window.GroupsModule = (function () {
     if (window.AppState) window.AppState.save(true);
   }
 
-  // Saturday-start week key (YYYY-MM-DD of Saturday) matching the app's Challenge week
   function getWeekKey(isoDate) {
     const dt = window.AppState.parseLocalISO(isoDate);
-    const dow = dt.getDay(); // 0=Sun..6=Sat
+    const dow = dt.getDay();
     const daysSinceSat = (dow + 1) % 7;
     dt.setDate(dt.getDate() - daysSinceSat);
     return window.AppState.getLocalTodayISO(dt);
@@ -103,9 +109,20 @@ window.GroupsModule = (function () {
     if (!b || !b.completed) return false;
     const mins = Number(b.minutes) || 0;
     if (mins < 5) return false;
-    // Exclude 5-second quick-test pomodoro books
     if (b.mode === 'pomodoro' && Number(b.durationSec) > 0 && Number(b.durationSec) <= 10) return false;
     return true;
+  }
+
+  function avatarColorFor(str) {
+    const s = String(str || 'A');
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash) + s.charCodeAt(i);
+    return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  }
+
+  function avatarInitial(name) {
+    const clean = String(name || 'S').trim();
+    return clean ? Array.from(clean)[0].toUpperCase() : 'S';
   }
 
   function computeMyStatsPayload() {
@@ -114,6 +131,8 @@ window.GroupsModule = (function () {
     const st = getSettings();
     const todayISO = window.AppState.getLocalTodayISO();
     const weekKey = getWeekKey(todayISO);
+    const todayTargetHrs = window.LedgerEngine ? window.LedgerEngine.getDailyTarget(todayISO) : 5.5;
+    const dailyTargetMinutes = Math.max(30, Math.round(todayTargetHrs * 60));
 
     const verifiedBooks = (data.books || []).filter(isVerifiedBook);
     let todayMinutes = 0;
@@ -137,12 +156,9 @@ window.GroupsModule = (function () {
       }
     }
 
-    // Calculate verified study streak
     let streak = 0;
     let cursor = todayISO;
-    if (!studyDaysSet.has(cursor)) {
-      cursor = window.AppState.addDaysISO(todayISO, -1);
-    }
+    if (!studyDaysSet.has(cursor)) cursor = window.AppState.addDaysISO(todayISO, -1);
     while (studyDaysSet.has(cursor)) {
       streak++;
       cursor = window.AppState.addDaysISO(cursor, -1);
@@ -156,21 +172,21 @@ window.GroupsModule = (function () {
     if (isStudying && st.groupShowSubject !== false) {
       const subj = timer.selectedSubjectId && window.AppUI ? window.AppUI.getSubjectById(timer.selectedSubjectId) : null;
       const tag = timer.selectedTagId && window.AppUI ? window.AppUI.getTagById(timer.selectedTagId) : null;
-      if (subj && subj.name) {
-        currentLabel = subj.name;
-      } else if (tag && tag.name) {
-        currentLabel = String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim() || tag.name;
-      }
+      if (subj && subj.name) currentLabel = subj.name;
+      else if (tag && tag.name) currentLabel = String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim() || tag.name;
     }
 
     const defaultName = (user && (user.displayName || (user.email ? user.email.split('@')[0] : ''))) || 'Student';
     const nickname = (st.groupNickname && String(st.groupNickname).trim()) || defaultName;
+    const statusText = (st.groupStatus && String(st.groupStatus).trim()) || '';
 
     return {
       uid: user ? user.uid : '',
       nickname: nickname.slice(0, 32),
+      statusText: statusText.slice(0, 42),
       todayISO,
       todayMinutes: Math.min(MAX_DAILY_MINUTES, Math.round(todayMinutes)),
+      dailyTargetMinutes,
       todayBooks,
       weekKey,
       weekMinutes: Math.min(MAX_DAILY_MINUTES * 7, Math.round(weekMinutes)),
@@ -187,7 +203,7 @@ window.GroupsModule = (function () {
 
   function presenceSignature(p) {
     return JSON.stringify([
-      p.nickname, p.todayISO, p.todayMinutes, p.todayBooks,
+      p.nickname, p.statusText, p.todayISO, p.todayMinutes, p.dailyTargetMinutes, p.todayBooks,
       p.weekKey, p.weekMinutes, p.totalMinutes, p.streak,
       p.isStudying, p.isPaused, p.studyStartedAt, p.studyAccumulatedSec, p.currentLabel
     ]);
@@ -232,9 +248,7 @@ window.GroupsModule = (function () {
   function generateInviteCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
-    }
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
     return code;
   }
 
@@ -288,15 +302,19 @@ window.GroupsModule = (function () {
       const gid = getActiveGroupId();
       const members = groupMembersMap[gid] || [];
       const byUid = new Map(members.map(m => [m.uid, m]));
-      const nodes = document.querySelectorAll('[data-live-member-clock]');
-      if (!nodes.length) return;
-      nodes.forEach(el => {
+      document.querySelectorAll('[data-live-member-clock]').forEach(el => {
         const uid = el.getAttribute('data-live-member-clock');
         const m = byUid.get(uid);
         if (m && isMemberActivelyStudying(m)) {
           el.textContent = formatClockHMS(getMemberLiveElapsedSec(m));
         }
       });
+      const sprintEl = document.getElementById('hall-sprint-clock');
+      const meta = groupMetaMap[gid];
+      if (sprintEl && meta && meta.sprint && meta.sprint.endsAt) {
+        const rem = Math.max(0, Math.floor((Number(meta.sprint.endsAt) - Date.now()) / 1000));
+        sprintEl.textContent = formatClockHMS(rem);
+      }
     }, 1000);
   }
 
@@ -308,14 +326,9 @@ window.GroupsModule = (function () {
   }
 
   function detach() {
-    if (activeUnsubMeta) {
-      try { activeUnsubMeta(); } catch (e) {}
-      activeUnsubMeta = null;
-    }
-    if (activeUnsubMembers) {
-      try { activeUnsubMembers(); } catch (e) {}
-      activeUnsubMembers = null;
-    }
+    if (activeUnsubMeta) { try { activeUnsubMeta(); } catch (e) {} activeUnsubMeta = null; }
+    if (activeUnsubMembers) { try { activeUnsubMembers(); } catch (e) {} activeUnsubMembers = null; }
+    if (activeUnsubCheers) { try { activeUnsubCheers(); } catch (e) {} activeUnsubCheers = null; }
     activeListenedGroupId = null;
     stopLiveClockTicker();
   }
@@ -323,10 +336,7 @@ window.GroupsModule = (function () {
   async function attachLiveListener(rerender) {
     lastRerenderFn = rerender || lastRerenderFn;
     const gid = getActiveGroupId();
-    if (!gid) {
-      detach();
-      return;
-    }
+    if (!gid) { detach(); return; }
     if (!window.GoogleSync || !window.GoogleSync.getUser()) return;
     if (navigator.onLine === false) return;
     if (activeListenedGroupId === gid && activeUnsubMembers) {
@@ -340,17 +350,14 @@ window.GroupsModule = (function () {
 
     try {
       const ready = await window.GoogleSync.ensureReady();
-      if (!ready || !ready.db || !ready.user) {
-        isLoadingGroup = false;
-        return;
-      }
+      if (!ready || !ready.db || !ready.user) { isLoadingGroup = false; return; }
       if (activeListenedGroupId !== gid) return;
       const db = ready.db;
+      const myUid = ready.user.uid;
 
       const groupRef = db.collection('groups').doc(gid);
       activeUnsubMeta = groupRef.onSnapshot((snap) => {
         if (!snap.exists) {
-          // Group was deleted by owner — remove locally
           const st = getSettings();
           st.groupIds = (st.groupIds || []).filter(id => id !== gid);
           if (st.activeGroupId === gid) st.activeGroupId = st.groupIds[0] || '';
@@ -367,24 +374,17 @@ window.GroupsModule = (function () {
         isLoadingGroup = false;
         saveCache();
         if (lastRerenderFn) lastRerenderFn();
-      }, () => {
-        isLoadingGroup = false;
-      });
+      }, () => { isLoadingGroup = false; });
 
       activeUnsubMembers = groupRef.collection('members').onSnapshot((qSnap) => {
         const list = [];
-        qSnap.forEach(doc => {
-          list.push({ uid: doc.id, ...doc.data() });
-        });
+        qSnap.forEach(doc => list.push({ uid: doc.id, ...doc.data() }));
         groupMembersMap[gid] = list;
         groupFetchedAt[gid] = Date.now();
         isLoadingGroup = false;
         saveCache();
 
-        // Check if current user was removed by owner
-        const myUid = ready.user.uid;
         if (list.length > 0 && !list.some(m => m.uid === myUid)) {
-          // Re-check meta: if owner removed us, leave cleanly
           if (groupMetaMap[gid] && groupMetaMap[gid].ownerUid !== myUid) {
             const st = getSettings();
             st.groupIds = (st.groupIds || []).filter(id => id !== gid);
@@ -393,17 +393,133 @@ window.GroupsModule = (function () {
             detach();
           }
         }
-
         startLiveClockTicker();
         if (lastRerenderFn) lastRerenderFn();
-      }, () => {
-        isLoadingGroup = false;
-      });
+      }, () => { isLoadingGroup = false; });
 
-      // Push fresh presence when entering group view
+      // Listen for incoming cheers directed at me
+      activeUnsubCheers = groupRef.collection('cheers').onSnapshot((cSnap) => {
+        cSnap.forEach(doc => {
+          const ch = doc.data();
+          if (ch && ch.toUid === myUid && Number(ch.at) > lastSeenCheerAt) {
+            lastSeenCheerAt = Number(ch.at);
+            if (window.AppUI) {
+              window.AppUI.showToast(
+                isAr() ? `🔥 ${ch.fromName || 'زميلك'} شجّعك — استمر!` : `🔥 ${ch.fromName || 'A teammate'} cheered you on!`,
+                'success'
+              );
+            }
+          }
+        });
+      }, () => {});
+
       syncMyPresence(false);
     } catch (e) {
       isLoadingGroup = false;
+    }
+  }
+
+  async function sendCheer(gid, targetUid, targetName) {
+    const ar = isAr();
+    try {
+      const raw = localStorage.getItem(CHEER_COOLDOWN_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      const lastAt = Number(map[targetUid]) || 0;
+      if (Date.now() - lastAt < 3600 * 1000) {
+        window.AppUI.showToast(ar ? `لقد شجّعت ${targetName} مؤخراً — يمكنك تكرارها بعد ساعة` : `Already cheered ${targetName} recently (1h cooldown)`, 'info');
+        return;
+      }
+      const ready = await window.GoogleSync.ensureReady();
+      if (!ready || !ready.db || !ready.user) return;
+      const myStats = computeMyStatsPayload();
+      await ready.db.collection('groups').doc(gid).collection('cheers').doc(ready.user.uid).set({
+        fromUid: ready.user.uid,
+        fromName: myStats.nickname,
+        toUid: targetUid,
+        toName: targetName,
+        at: Date.now()
+      });
+      map[targetUid] = Date.now();
+      localStorage.setItem(CHEER_COOLDOWN_KEY, JSON.stringify(map));
+      window.AppUI.showToast(ar ? `أرسلت تشجيعاً لـ ${targetName} 🔥` : `Sent a cheer to ${targetName} 🔥`, 'success');
+    } catch (e) {
+      window.AppUI.showToast(ar ? 'تأكد من نشر قواعد FIRESTORE_RULES.txt أولاً' : 'Publish FIRESTORE_RULES.txt in Firebase first', 'warning');
+    }
+  }
+
+  async function startGroupSprint(gid, durationMins, title) {
+    const ar = isAr();
+    try {
+      const ready = await window.GoogleSync.ensureReady();
+      if (!ready || !ready.db || !ready.user) return { ok: false };
+      const myStats = computeMyStatsPayload();
+      const now = Date.now();
+      const dur = Math.max(10, Math.min(180, Math.round(Number(durationMins) || 50)));
+      const sprint = {
+        startedAt: now,
+        endsAt: now + dur * 60000,
+        durationMins: dur,
+        hostUid: ready.user.uid,
+        hostName: myStats.nickname,
+        title: String(title || '').trim().slice(0, 40)
+      };
+      await ready.db.collection('groups').doc(gid).set({ sprint }, { merge: true });
+      return { ok: true, sprint };
+    } catch (e) {
+      const msg = (e && e.code === 'permission-denied')
+        ? (ar ? 'انشر قواعد FIRESTORE_RULES.txt الجديدة في Firebase أولاً' : 'Publish updated FIRESTORE_RULES.txt in Firebase first')
+        : (ar ? 'تعذر بدء الجلسة الجماعية' : 'Failed to start group sprint');
+      return { ok: false, error: msg };
+    }
+  }
+
+  function openSprintModal(gid, rerender) {
+    const ar = isAr();
+    window.AppUI.openModal({
+      title: ar ? '🚀 بدء جلسة دراسة جماعية (Sprint)' : '🚀 Start Group Study Sprint',
+      bodyHtml: `
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'مدة الجلسة' : 'Duration'}</label>
+            <select id="sprint-dur" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm font-bold">
+              <option value="25">25 ${ar ? 'دقيقة' : 'min'}</option>
+              <option value="45">45 ${ar ? 'دقيقة' : 'min'}</option>
+              <option value="50" selected>50 ${ar ? 'دقيقة' : 'min'}</option>
+              <option value="60">60 ${ar ? 'دقيقة' : 'min'}</option>
+              <option value="90">90 ${ar ? 'دقيقة' : 'min'}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'هدف الجلسة (اختياري)' : 'Sprint Goal (optional)'}</label>
+            <input id="sprint-title" type="text" maxlength="40" placeholder="${ar ? 'مثال: مراجعة الباثولوجي بصمت' : 'e.g. Silent Pathology Sprint'}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"/>
+          </div>
+        </div>
+      `,
+      footerHtml: `
+        <button type="button" onclick="window.AppUI.closeModal()" class="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إلغاء' : 'Cancel'}</button>
+        <button id="sprint-start-go" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">${ar ? 'ابدأ الآن 🚀' : 'Start Now 🚀'}</button>
+      `
+    });
+    const btn = document.getElementById('sprint-start-go');
+    if (btn) {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const dur = Number(document.getElementById('sprint-dur').value) || 50;
+        const title = document.getElementById('sprint-title').value;
+        const res = await startGroupSprint(gid, dur, title);
+        btn.disabled = false;
+        if (res.ok) {
+          window.AppUI.closeModal();
+          window.AppUI.showToast(ar ? `بدأت الجلسة الجماعية (${dur} د) 🚀` : `Group Sprint started (${dur}m) 🚀`, 'success');
+          if (window.FocusModule && window.FocusModule.startSyncedSprint) {
+            window.FocusModule.startSyncedSprint(dur);
+          } else if (rerender) {
+            rerender();
+          }
+        } else {
+          window.AppUI.showToast(res.error, 'danger');
+        }
+      };
     }
   }
 
@@ -423,14 +539,7 @@ window.GroupsModule = (function () {
       const code = generateInviteCode();
       const goal = Math.max(5, Math.min(2000, Math.round(Number(weeklyGoalHours) || 100)));
       const docRef = db.collection('groups').doc();
-      const meta = {
-        name: cleanName,
-        code,
-        ownerUid: ready.user.uid,
-        weeklyGoalHours: goal,
-        locked: false,
-        createdAt: Date.now()
-      };
+      const meta = { name: cleanName, code, ownerUid: ready.user.uid, weeklyGoalHours: goal, locked: false, createdAt: Date.now() };
       await docRef.set(meta);
       const myPayload = computeMyStatsPayload();
       await docRef.collection('members').doc(ready.user.uid).set(myPayload);
@@ -455,34 +564,26 @@ window.GroupsModule = (function () {
   async function joinGroupByCode(rawCode) {
     const ar = isAr();
     const code = String(rawCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (code.length < 4) {
-      return { ok: false, error: ar ? 'أدخل رمز دعوة صحيحاً' : 'Enter a valid invite code' };
-    }
+    if (code.length < 4) return { ok: false, error: ar ? 'أدخل رمز دعوة صحيحاً' : 'Enter a valid invite code' };
     if (getJoinedGroupIds().length >= MAX_GROUPS) {
       return { ok: false, error: ar ? `الحد الأقصى ${MAX_GROUPS} مجموعات` : `Maximum ${MAX_GROUPS} groups allowed` };
     }
     try {
       const ready = await window.GoogleSync.ensureReady();
-      if (!ready || !ready.db || !ready.user) {
-        return { ok: false, error: ar ? 'سجّل الدخول بحساب Google أولاً' : 'Sign in with Google first' };
-      }
+      if (!ready || !ready.db || !ready.user) return { ok: false, error: ar ? 'سجّل الدخول بحساب Google أولاً' : 'Sign in with Google first' };
       const db = ready.db;
       const qSnap = await db.collection('groups').where('code', '==', code).limit(1).get();
-      if (qSnap.empty) {
-        return { ok: false, error: ar ? 'لم يتم العثور على مجموعة بهذا الرمز' : 'No group found with that code' };
-      }
+      if (qSnap.empty) return { ok: false, error: ar ? 'لم يتم العثور على مجموعة بهذا الرمز' : 'No group found with that code' };
       const gDoc = qSnap.docs[0];
       const gData = gDoc.data() || {};
       if (gData.locked && gData.ownerUid !== ready.user.uid) {
         return { ok: false, error: ar ? 'الانضمام لهذه المجموعة مغلق حالياً' : 'This group is currently locked' };
       }
-
       const memSnap = await gDoc.ref.collection('members').get();
       const alreadyIn = memSnap.docs.some(d => d.id === ready.user.uid);
       if (!alreadyIn && memSnap.size >= MAX_MEMBERS_PER_GROUP) {
         return { ok: false, error: ar ? 'المجموعة ممتلئة (الحد الأقصى 30 عضواً)' : 'Group is full (max 30 members)' };
       }
-
       const myPayload = computeMyStatsPayload();
       await gDoc.ref.collection('members').doc(ready.user.uid).set(myPayload, { merge: true });
 
@@ -537,9 +638,7 @@ window.GroupsModule = (function () {
       if (!ready || !ready.db) return false;
       await ready.db.collection('groups').doc(gid).collection('members').doc(targetUid).delete();
       return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (e) { return false; }
   }
 
   function buildInviteUrl(code) {
@@ -548,9 +647,7 @@ window.GroupsModule = (function () {
       url.search = '?join=' + encodeURIComponent(code);
       url.hash = '';
       return url.toString();
-    } catch (e) {
-      return '?join=' + encodeURIComponent(code);
-    }
+    } catch (e) { return '?join=' + encodeURIComponent(code); }
   }
 
   function checkJoinLink() {
@@ -559,12 +656,9 @@ window.GroupsModule = (function () {
       const joinCode = (params.get('join') || '').trim().toUpperCase();
       if (!joinCode) return;
       sessionStorage.setItem(PENDING_JOIN_KEY, joinCode);
-      // Clean query param so refresh doesn't re-trigger
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
-      // Navigate directly to Focus -> Study Together
-      if (window.AppState) window.AppState.setActiveTab('focus');
-      try { localStorage.setItem('study_tracker_focus_bottom_view', 'group'); } catch (e) {}
+      if (window.AppState) window.AppState.setActiveTab('hall');
     } catch (e) {}
   }
 
@@ -573,14 +667,12 @@ window.GroupsModule = (function () {
     try { code = sessionStorage.getItem(PENDING_JOIN_KEY) || ''; } catch (e) {}
     if (!code) return;
     const user = window.GoogleSync && window.GoogleSync.getUser();
-    if (!user) return; // Wait until user signs in
+    if (!user) return;
     try { sessionStorage.removeItem(PENDING_JOIN_KEY); } catch (e) {}
     const ar = isAr();
     window.AppUI.confirmAction({
-      title: ar ? 'دعوة للانضمام إلى مجموعة دراسة' : 'Study Group Invitation',
-      message: ar
-        ? `هل تريد الانضمام إلى المجموعة برمز الدعوة (${code})؟`
-        : `Join study group with invite code (${code})?`,
+      title: ar ? 'دعوة للانضمام إلى القاعة' : 'Study Hall Invitation',
+      message: ar ? `هل تريد الانضمام إلى المجموعة برمز الدعوة (${code})؟` : `Join study group with invite code (${code})?`,
       confirmText: ar ? 'انضمام الآن' : 'Join Now',
       onConfirm: async () => {
         const res = await joinGroupByCode(code);
@@ -619,9 +711,7 @@ window.GroupsModule = (function () {
     if (btn) {
       btn.onclick = async () => {
         btn.disabled = true;
-        const name = document.getElementById('grp-create-name').value;
-        const goal = document.getElementById('grp-create-goal').value;
-        const res = await createGroup(name, goal);
+        const res = await createGroup(document.getElementById('grp-create-name').value, document.getElementById('grp-create-goal').value);
         btn.disabled = false;
         if (res.ok) {
           window.AppUI.closeModal();
@@ -644,7 +734,7 @@ window.GroupsModule = (function () {
             <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'رمز الدعوة (6 أحرف)' : 'Invite Code (6 chars)'}</label>
             <input id="grp-join-code" type="text" maxlength="10" dir="ltr" placeholder="MED482" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm font-mono uppercase text-center tracking-widest"/>
           </div>
-          <p class="text-[11px] text-slate-400">${ar ? 'تتم مشاركة ساعات المؤقت الموثّقة فقط؛ مهامك وملاحظاتك تبقى خاصة بك.' : 'Only verified timer hours are shared; your tasks and notes remain 100% private.'}</p>
+          <p class="text-[11px] text-slate-400">${ar ? 'تتم مشاركة ساعات المؤقت الموثّقة فقط؛ ملاحظاتك وبياناتك الشخصية تبقى خاصة بك.' : 'Only verified timer hours are shared; your personal data stays 100% private.'}</p>
         </div>
       `,
       footerHtml: `
@@ -656,8 +746,7 @@ window.GroupsModule = (function () {
     if (btn) {
       btn.onclick = async () => {
         btn.disabled = true;
-        const code = document.getElementById('grp-join-code').value;
-        const res = await joinGroupByCode(code);
+        const res = await joinGroupByCode(document.getElementById('grp-join-code').value);
         btn.disabled = false;
         if (res.ok) {
           window.AppUI.closeModal();
@@ -676,17 +765,20 @@ window.GroupsModule = (function () {
     const user = window.GoogleSync && window.GoogleSync.getUser();
     const fallbackName = (user && (user.displayName || (user.email ? user.email.split('@')[0] : ''))) || '';
     window.AppUI.openModal({
-      title: ar ? 'ملفك وخصوصيتك في المجموعة' : 'Group Profile & Privacy',
+      title: ar ? 'ملفك وحالتك في القاعة' : 'Study Hall Profile & Status',
       bodyHtml: `
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'الاسم المعروض للأعضاء' : 'Display Nickname'}</label>
+            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'الاسم المعروض' : 'Display Nickname'}</label>
             <input id="grp-prof-nick" type="text" maxlength="32" value="${escapeHtml(st.groupNickname || fallbackName)}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"/>
-            <p class="text-[10px] text-slate-400 mt-1">${ar ? 'بريدك الإلكتروني لا يظهر أبداً لبقية الأعضاء.' : 'Your email address is never shown to other members.'}</p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'حالة دراسة قصيرة (تظهر تحت اسمك)' : 'Short Study Status'}</label>
+            <input id="grp-prof-status" type="text" maxlength="42" value="${escapeHtml(st.groupStatus || '')}" placeholder="${ar ? 'مثال: تحضير كويز الفارما 🩺' : 'e.g. Prepping Pharma Quiz 🩺'}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"/>
           </div>
           <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200 cursor-pointer pt-1">
             <input id="grp-prof-subj" type="checkbox" ${st.groupShowSubject !== false ? 'checked' : ''} class="accent-indigo-600"/>
-            <span>${ar ? 'إظهار اسم المادة أو التاغ أثناء الدراسة' : 'Show current subject/tag while studying'}</span>
+            <span>${ar ? 'إظهار اسم المادة أثناء الدراسة' : 'Show current subject while studying'}</span>
           </label>
         </div>
       `,
@@ -699,11 +791,12 @@ window.GroupsModule = (function () {
     if (btn) {
       btn.onclick = async () => {
         st.groupNickname = (document.getElementById('grp-prof-nick').value || '').trim().slice(0, 32);
+        st.groupStatus = (document.getElementById('grp-prof-status').value || '').trim().slice(0, 42);
         st.groupShowSubject = !!document.getElementById('grp-prof-subj').checked;
         window.AppState.save(true);
         window.AppUI.closeModal();
         await syncMyPresence(true);
-        window.AppUI.showToast(ar ? 'تم تحديث ملف المجموعة' : 'Group profile updated', 'success');
+        window.AppUI.showToast(ar ? 'تم تحديث ملف القاعة' : 'Hall profile updated', 'success');
         if (rerender) rerender();
       };
     }
@@ -754,10 +847,10 @@ window.GroupsModule = (function () {
           ${membersHtml}
         </div>
       ` : `
-        <p class="text-xs text-slate-600 dark:text-slate-300">${ar ? `أنت عضو في مجموعة "${escapeHtml(meta.name)}". يمكنك مغادرتها في أي وقت دون التأثير على بياناتك الشخصية.` : `You are a member of "${escapeHtml(meta.name)}". Leaving will not affect your personal study data.`}</p>
+        <p class="text-xs text-slate-600 dark:text-slate-300">${ar ? `أنت عضو في "${escapeHtml(meta.name)}". مغادرتها لا تؤثر على بياناتك الشخصية.` : `You are a member of "${escapeHtml(meta.name)}". Leaving does not affect your personal data.`}</p>
       `,
       footerHtml: isOwner ? `
-        <button id="grp-delete-btn" type="button" class="mr-auto px-3 py-2 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-xs font-bold">${ar ? 'حذف المجموعة' : 'Delete'}</button>
+        <button id="grp-delete-btn" type="button" class="mr-auto px-3 py-2 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-xs font-bold">${ar ? 'حذف' : 'Delete'}</button>
         <button type="button" onclick="window.AppUI.closeModal()" class="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إلغاء' : 'Cancel'}</button>
         <button id="grp-save-btn" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">${ar ? 'حفظ' : 'Save'}</button>
       ` : `
@@ -769,20 +862,11 @@ window.GroupsModule = (function () {
     if (isOwner) {
       let nextCode = meta.code;
       const regenBtn = document.getElementById('grp-regen-code');
-      if (regenBtn) {
-        regenBtn.onclick = () => {
-          nextCode = generateInviteCode();
-          regenBtn.textContent = nextCode;
-        };
-      }
+      if (regenBtn) regenBtn.onclick = () => { nextCode = generateInviteCode(); regenBtn.textContent = nextCode; };
       document.querySelectorAll('[data-kick-uid]').forEach(btn => {
         btn.onclick = async () => {
-          const uid = btn.getAttribute('data-kick-uid');
-          const ok = await removeMember(gid, uid);
-          if (ok) {
-            btn.closest('div').remove();
-            window.AppUI.showToast(ar ? 'تمت إزالة العضو' : 'Member removed', 'info');
-          }
+          const ok = await removeMember(gid, btn.getAttribute('data-kick-uid'));
+          if (ok) { btn.closest('div').remove(); window.AppUI.showToast(ar ? 'تمت إزالة العضو' : 'Member removed', 'info'); }
         };
       });
       const saveBtn = document.getElementById('grp-save-btn');
@@ -794,14 +878,9 @@ window.GroupsModule = (function () {
           if (!newName) return;
           try {
             const ready = await window.GoogleSync.ensureReady();
-            await ready.db.collection('groups').doc(gid).set({
-              name: newName,
-              weeklyGoalHours: newGoal,
-              code: nextCode,
-              locked
-            }, { merge: true });
+            await ready.db.collection('groups').doc(gid).set({ name: newName, weeklyGoalHours: newGoal, code: nextCode, locked }, { merge: true });
             window.AppUI.closeModal();
-            window.AppUI.showToast(ar ? 'تم حفظ إعدادات المجموعة' : 'Group settings saved', 'success');
+            window.AppUI.showToast(ar ? 'تم حفظ الإعدادات' : 'Settings saved', 'success');
             if (rerender) rerender();
           } catch (e) {
             window.AppUI.showToast(ar ? 'تعذر الحفظ' : 'Save failed', 'danger');
@@ -813,7 +892,7 @@ window.GroupsModule = (function () {
         delBtn.onclick = () => {
           window.AppUI.confirmAction({
             title: ar ? 'حذف المجموعة نهائياً' : 'Delete Group',
-            message: ar ? 'سيتم حذف المجموعة وإزالة جميع الأعضاء منها. هل أنت متأكد؟' : 'This will permanently delete the group for all members. Continue?',
+            message: ar ? 'سيتم حذف المجموعة لجميع الأعضاء. هل أنت متأكد؟' : 'Permanently delete this group for all members?',
             confirmText: ar ? 'نعم، احذف' : 'Delete',
             danger: true,
             onConfirm: async () => {
@@ -843,10 +922,10 @@ window.GroupsModule = (function () {
     if (!user) {
       return `
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 text-center shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
-          <div class="text-3xl">👥</div>
-          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${ar ? 'مجموعات الدراسة والليدربورد' : 'Study Groups & Leaderboard'}</h3>
+          <div class="text-3xl">🏛️</div>
+          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${ar ? 'القاعة — الدراسة الجماعية والليدربورد' : 'Study Hall — Study Together'}</h3>
           <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            ${ar ? 'سجّل الدخول بحساب Google لإنشاء مجموعة دراسة أو الانضمام لأصدقائك، ومتابعة غرفة الدراسة الحية والترتيب اليومي والأسبوعي.' : 'Sign in with Google to create or join a study group, see who is studying live, and compete on daily & weekly leaderboards.'}
+            ${ar ? 'سجّل الدخول بحساب Google للدخول إلى القاعة، بدء جلسات دراسة متزامنة مع زملائك، ومتابعة الترتيب اليومي ونسبة إنجاز الهدف.' : 'Sign in with Google to join the Study Hall, start synced Group Sprints, and compete fairly by hours or personal Goal %.'}
           </p>
           <button id="grp-signin-btn" type="button" class="w-full py-2.5 px-4 rounded-xl bg-indigo-600 text-white text-xs font-bold">
             ${ar ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google'}
@@ -859,14 +938,14 @@ window.GroupsModule = (function () {
     if (!joinedIds.length) {
       return `
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 text-center shadow-sm border border-slate-200 dark:border-slate-700 space-y-3.5">
-          <div class="text-3xl">🏆</div>
-          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${ar ? 'ابدأ الدراسة مع فريقك' : 'Study Together & Stay Accountable'}</h3>
+          <div class="text-3xl">🏛️</div>
+          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${ar ? 'مرحباً بك في القاعة' : 'Welcome to Study Hall'}</h3>
           <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            ${ar ? 'أنشئ مجموعة جديدة وشارك رمز الدعوة مع زملائك، أو انضم إلى مجموعة موجودة.' : 'Create a new study group and share the invite code, or join an existing group.'}
+            ${ar ? 'أنشئ قاعة دراسة خاصة بفريقك وشارك رمز الدعوة، أو انضم إلى قاعة موجودة.' : 'Create a study group and share the invite code, or join an existing group.'}
           </p>
           <div class="grid grid-cols-2 gap-2">
             <button id="grp-open-create" type="button" class="py-2.5 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">
-              ${ar ? '➕ إنشاء مجموعة' : '➕ Create Group'}
+              ${ar ? '➕ إنشاء قاعة' : '➕ Create Hall'}
             </button>
             <button id="grp-open-join" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">
               ${ar ? '🔗 انضمام برمز' : '🔗 Join by Code'}
@@ -882,40 +961,51 @@ window.GroupsModule = (function () {
     const todayISO = window.AppState.getLocalTodayISO();
     const weekKey = getWeekKey(todayISO);
 
-    // Compute normalized stats per member (zero-backend daily/weekly reset)
     const normalized = members.map(m => {
       const activeNow = isMemberActivelyStudying(m);
       const pausedNow = !!(m.isStudying && m.isPaused);
       const liveExtraMins = activeNow ? Math.floor(getMemberLiveElapsedSec(m) / 60) : 0;
       const dayMins = (m.todayISO === todayISO ? (Number(m.todayMinutes) || 0) : 0) + liveExtraMins;
+      const targetMins = Math.max(30, Number(m.dailyTargetMinutes) || 330);
+      const goalPct = Math.min(200, Math.round((dayMins / targetMins) * 100));
       const wkMins = (m.weekKey === weekKey ? (Number(m.weekMinutes) || 0) : 0) + liveExtraMins;
       const totMins = (Number(m.totalMinutes) || 0) + liveExtraMins;
       const dayBooks = m.todayISO === todayISO ? (Number(m.todayBooks) || 0) : 0;
-      return {
-        ...m,
-        activeNow,
-        pausedNow,
-        dayMins,
-        wkMins,
-        totMins,
-        dayBooks
-      };
+      return { ...m, activeNow, pausedNow, dayMins, targetMins, goalPct, wkMins, totMins, dayBooks };
     });
 
     const studyingCount = normalized.filter(m => m.activeNow).length;
     const totalWeekHours = Math.round((normalized.reduce((s, m) => s + m.wkMins, 0) / 60) * 10) / 10;
     const goalHours = Number(meta.weeklyGoalHours) || 100;
-    const goalPct = goalHours > 0 ? Math.min(100, Math.round((totalWeekHours / goalHours) * 100)) : 0;
+    const grpGoalPct = goalHours > 0 ? Math.min(100, Math.round((totalWeekHours / goalHours) * 100)) : 0;
 
-    // Sort leaderboard by selected period
+    // Active synchronized sprint check
+    const sprint = meta.sprint && Number(meta.sprint.endsAt) > Date.now() ? meta.sprint : null;
+    const sprintRemSec = sprint ? Math.max(0, Math.floor((Number(sprint.endsAt) - Date.now()) / 1000)) : 0;
+
+    // Rank leaderboard
+    const metricVal = (m) => leaderboardPeriod === 'today' ? m.dayMins : (leaderboardPeriod === 'goal' ? m.goalPct : (leaderboardPeriod === 'week' ? m.wkMins : m.totMins));
     const ranked = [...normalized].sort((a, b) => {
-      const av = leaderboardPeriod === 'today' ? a.dayMins : (leaderboardPeriod === 'week' ? a.wkMins : a.totMins);
-      const bv = leaderboardPeriod === 'today' ? b.dayMins : (leaderboardPeriod === 'week' ? b.wkMins : b.totMins);
-      if (bv !== av) return bv - av;
+      const diff = metricVal(b) - metricVal(a);
+      if (diff !== 0) return diff;
       return (b.streak || 0) - (a.streak || 0);
     });
 
-    // Live study room sorted: studying first, then paused, then offline
+    // Next-rank motivation gap banner
+    const myRankIdx = ranked.findIndex(m => m.uid === user.uid);
+    let rankHintHtml = '';
+    if (myRankIdx === 0 && ranked.length > 1) {
+      rankHintHtml = `<div class="px-3 py-1.5 rounded-xl bg-amber-50/70 dark:bg-amber-900/30 text-[11px] font-bold text-amber-700 dark:text-amber-300 text-center">👑 ${ar ? 'أنت في الصدارة حالياً — حافظ على المركز الأول!' : 'You are currently #1 — keep the lead!'}</div>`;
+    } else if (myRankIdx > 0) {
+      const above = ranked[myRankIdx - 1];
+      const me = ranked[myRankIdx];
+      const gap = Math.max(1, metricVal(above) - metricVal(me));
+      const gapText = leaderboardPeriod === 'goal'
+        ? `${gap}%`
+        : formatMinsShort(gap);
+      rankHintHtml = `<div class="px-3 py-1.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-900/30 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 text-center">⚡ ${ar ? `باقي لك ${gapText} لتتجاوز المركز #${myRankIdx}` : `${gapText} away from passing #${myRankIdx}`}</div>`;
+    }
+
     const roomOrder = [...normalized].sort((a, b) => {
       const score = (x) => x.activeNow ? 2 : (x.pausedNow ? 1 : 0);
       if (score(b) !== score(a)) return score(b) - score(a);
@@ -925,90 +1015,109 @@ window.GroupsModule = (function () {
     const switcherHtml = joinedIds.length > 1 ? `
       <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
         ${joinedIds.map(id => {
-          const nm = (groupMetaMap[id] && groupMetaMap[id].name) || (ar ? 'مجموعة' : 'Group');
+          const nm = (groupMetaMap[id] && groupMetaMap[id].name) || (ar ? 'قاعة' : 'Hall');
           return `<button type="button" data-switch-group="${escapeHtml(id)}" class="px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition ${id === gid ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}">${escapeHtml(nm)}</button>`;
         }).join('')}
       </div>
     ` : '';
-
-    const offlineNotice = navigator.onLine === false && groupFetchedAt[gid]
-      ? `<div class="text-[10px] text-amber-600 dark:text-amber-400 text-center">${ar ? 'وضع عدم الاتصال — آخر تحديث محفوظ محلياً' : 'Offline — showing cached leaderboard'}</div>`
-      : '';
 
     const medals = ['🥇', '🥈', '🥉'];
 
     return `
       <div class="space-y-3">
         ${switcherHtml}
-        ${offlineNotice}
+
+        <!-- Active Group Sprint Banner -->
+        ${sprint ? `
+          <div class="bg-white dark:bg-slate-800 rounded-2xl p-3.5 shadow-sm border border-emerald-400/70 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-xs font-extrabold text-emerald-700 dark:text-emerald-300 truncate">🚀 ${sprint.title ? escapeHtml(sprint.title) : (ar ? 'جلسة جماعية شغّالة الآن' : 'Group Sprint Live Now')}</div>
+                <div class="text-[10px] text-slate-400">${ar ? 'بواسطة' : 'Host:'} ${escapeHtml(sprint.hostName || '')}</div>
+              </div>
+              <div id="hall-sprint-clock" class="text-sm font-mono font-extrabold text-emerald-600 dark:text-emerald-400 shrink-0" dir="ltr">${formatClockHMS(sprintRemSec)}</div>
+            </div>
+            <button id="hall-join-sprint" type="button" class="w-full py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold">
+              ${ar ? '🚀 انضم للجلسة بنفس وقت الانتهاء' : '🚀 Join Sprint (Synced End Time)'}
+            </button>
+          </div>
+        ` : ''}
 
         <!-- Group Header & Shared Weekly Goal -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5">
-                <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">👥 ${escapeHtml(meta.name)}</h3>
+                <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">🏛️ ${escapeHtml(meta.name)}</h3>
                 ${studyingCount > 0 ? `<span class="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold shrink-0">🟢 ${studyingCount}</span>` : ''}
               </div>
               <div class="flex items-center gap-2 mt-1">
                 <span class="text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400" dir="ltr">${escapeHtml(meta.code || '')}</span>
                 <button id="grp-share-invite" type="button" class="text-[10px] px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-bold">
-                  ${ar ? '📋 نسخ الدعوة' : '📋 Copy Invite'}
+                  ${ar ? '📋 دعوة' : '📋 Invite'}
+                </button>
+                <button id="hall-start-sprint" type="button" class="text-[10px] px-2 py-0.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold">
+                  ${ar ? '🚀 جلسة جماعية' : '🚀 Sprint'}
                 </button>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <button id="grp-profile-btn" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs" title="${ar ? 'الاسم والخصوصية' : 'Profile & Privacy'}">👤</button>
+              <button id="grp-profile-btn" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs" title="${ar ? 'الاسم والحالة' : 'Profile & Status'}">👤</button>
               <button id="grp-manage-btn" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs" title="${ar ? 'إعدادات المجموعة' : 'Group Settings'}">⚙️</button>
             </div>
           </div>
 
-          <!-- Shared Weekly Goal -->
           <div>
             <div class="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-              <span>${ar ? '🎯 هدف المجموعة الأسبوعي' : '🎯 Group Weekly Goal'}</span>
-              <span class="font-bold text-slate-700 dark:text-slate-200">${window.AppUI.formatHours(totalWeekHours)} / ${goalHours}${ar ? 'س' : 'h'} (${goalPct}%)</span>
+              <span>${ar ? '🎯 هدف القاعة الأسبوعي' : '🎯 Group Weekly Goal'}</span>
+              <span class="font-bold text-slate-700 dark:text-slate-200">${window.AppUI.formatHours(totalWeekHours)} / ${goalHours}${ar ? 'س' : 'h'} (${grpGoalPct}%)</span>
             </div>
             <div class="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-              <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all" style="width:${goalPct}%"></div>
+              <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all" style="width:${grpGoalPct}%"></div>
             </div>
           </div>
         </div>
 
-        <!-- Live Study Room Grid -->
+        <!-- Live Study Room with Avatars & 1-Tap Cheer -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
           <div class="flex items-center justify-between mb-2.5">
             <h4 class="text-xs font-bold text-slate-700 dark:text-slate-200">${ar ? 'غرفة الدراسة الحية' : 'Live Study Room'} (${normalized.length})</h4>
-            <span class="text-[10px] text-slate-400">${studyingCount > 0 ? (ar ? `${studyingCount} يدرسون الآن` : `${studyingCount} studying now`) : (ar ? 'لا أحد يدرس حالياً' : 'Nobody studying now')}</span>
+            <span class="text-[10px] text-slate-400">${ar ? 'اضغط على أي زميل لتشجيعه 🔥' : 'Tap a teammate to cheer 🔥'}</span>
           </div>
           <div class="grid grid-cols-3 gap-2">
             ${roomOrder.map(m => {
               const isMe = m.uid === user.uid;
-              const statusDot = m.activeNow ? '🟢' : (m.pausedNow ? '⏸️' : '⚪');
+              const avBg = avatarColorFor(m.nickname || m.uid);
+              const init = avatarInitial(m.nickname);
               const clockTxt = m.activeNow
                 ? formatClockHMS(getMemberLiveElapsedSec(m))
                 : (m.pausedNow ? (ar ? 'استراحة' : 'Paused') : formatMinsShort(m.dayMins));
+              const subLine = m.activeNow && m.currentLabel ? m.currentLabel : (m.statusText || '');
               return `
-                <div class="p-2.5 rounded-xl border text-center space-y-1 ${m.activeNow ? 'border-emerald-400/70 bg-emerald-50/50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40'}">
-                  <div class="text-xs leading-none">${statusDot}</div>
+                <button type="button" ${!isMe ? `data-cheer-uid="${escapeHtml(m.uid)}" data-cheer-name="${escapeHtml(m.nickname || 'Student')}"` : ''}
+                  class="p-2.5 rounded-xl border text-center space-y-1 transition ${m.activeNow ? 'border-emerald-400/70 bg-emerald-50/50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40'}">
+                  <div class="mx-auto flex items-center justify-center relative" style="width:34px;height:34px;border-radius:9999px;background:${avBg};color:#fff;font-size:13px;font-weight:800;${m.activeNow ? 'box-shadow:0 0 0 2.5px #10b981;' : ''}">
+                    ${escapeHtml(init)}
+                  </div>
                   <div class="text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate">${escapeHtml(m.nickname || 'Student')}${isMe ? (ar ? ' (أنت)' : ' (You)') : ''}</div>
                   <div class="text-xs font-mono font-extrabold ${m.activeNow ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}" dir="ltr" ${m.activeNow ? `data-live-member-clock="${escapeHtml(m.uid)}"` : ''}>${clockTxt}</div>
-                  ${m.activeNow && m.currentLabel ? `<div class="text-[9px] text-indigo-600 dark:text-indigo-300 truncate">${escapeHtml(m.currentLabel)}</div>` : ''}
-                </div>
+                  ${subLine ? `<div class="text-[9px] text-indigo-600 dark:text-indigo-300 truncate">${escapeHtml(subLine)}</div>` : ''}
+                </button>
               `;
             }).join('')}
           </div>
         </div>
 
-        <!-- Leaderboard Card -->
+        <!-- Fair Leaderboard Card -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
-          <div class="flex items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <h4 class="text-xs font-bold text-slate-700 dark:text-slate-200">🏅 ${ar ? 'لوحة المتصدرين' : 'Leaderboard'}</h4>
             <div class="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-900 text-[10px]">
               ${[
                 { id: 'today', ar: 'اليوم', en: 'Today' },
+                { id: 'goal', ar: 'الهدف %', en: 'Goal %' },
                 { id: 'week', ar: 'الأسبوع', en: 'Week' },
-                { id: 'total', ar: 'الإجمالي', en: 'Total' }
+                { id: 'total', ar: 'الكل', en: 'All' }
               ].map(p => `
                 <button type="button" data-lb-period="${p.id}" class="px-2 py-1 rounded-md font-bold transition ${leaderboardPeriod === p.id ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
                   ${ar ? p.ar : p.en}
@@ -1017,10 +1126,14 @@ window.GroupsModule = (function () {
             </div>
           </div>
 
+          ${rankHintHtml}
+
           <div class="divide-y divide-slate-100 dark:divide-slate-700/70">
             ${ranked.length ? ranked.map((m, idx) => {
               const isMe = m.uid === user.uid;
-              const valMins = leaderboardPeriod === 'today' ? m.dayMins : (leaderboardPeriod === 'week' ? m.wkMins : m.totMins);
+              const valTxt = leaderboardPeriod === 'goal'
+                ? `${m.goalPct}%`
+                : formatMinsShort(leaderboardPeriod === 'today' ? m.dayMins : (leaderboardPeriod === 'week' ? m.wkMins : m.totMins));
               const rankBadge = idx < 3 ? medals[idx] : `<span class="text-[11px] font-bold text-slate-400">#${idx + 1}</span>`;
               return `
                 <div class="py-2.5 flex items-center justify-between gap-2 ${isMe ? 'bg-indigo-50/50 dark:bg-indigo-900/20 -mx-2 px-2 rounded-xl' : ''}">
@@ -1032,12 +1145,13 @@ window.GroupsModule = (function () {
                       </div>
                       <div class="text-[10px] text-slate-400 flex items-center gap-2">
                         ${m.streak > 0 ? `<span>🔥 ${m.streak}${ar ? 'ي' : 'd'}</span>` : ''}
-                        ${leaderboardPeriod === 'today' && m.dayBooks > 0 ? `<span>📚 ${m.dayBooks}</span>` : ''}
-                        ${m.activeNow ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold">● ${ar ? 'يدرس الآن' : 'Studying'}</span>` : ''}
+                        ${m.dayBooks > 0 ? `<span>📚 ${m.dayBooks}</span>` : ''}
+                        ${leaderboardPeriod === 'goal' ? `<span>${formatMinsShort(m.dayMins)} / ${formatMinsShort(m.targetMins)}</span>` : ''}
+                        ${m.activeNow ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold">● ${ar ? 'يدرس' : 'Live'}</span>` : ''}
                       </div>
                     </div>
                   </div>
-                  <div class="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 shrink-0">${formatMinsShort(valMins)}</div>
+                  <div class="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 shrink-0">${valTxt}</div>
                 </div>
               `;
             }).join('') : `<div class="py-4 text-center text-xs text-slate-400">${isLoadingGroup ? (ar ? 'جاري تحميل البيانات...' : 'Loading...') : (ar ? 'لا يوجد أعضاء بعد' : 'No members yet')}</div>`}
@@ -1047,7 +1161,7 @@ window.GroupsModule = (function () {
         ${joinedIds.length < MAX_GROUPS ? `
           <div class="grid grid-cols-2 gap-2">
             <button id="grp-open-create" type="button" class="py-2 px-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">
-              ${ar ? '➕ مجموعة جديدة' : '➕ New Group'}
+              ${ar ? '➕ قاعة جديدة' : '➕ New Hall'}
             </button>
             <button id="grp-open-join" type="button" class="py-2 px-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">
               ${ar ? '🔗 انضمام برمز' : '🔗 Join Code'}
@@ -1061,6 +1175,7 @@ window.GroupsModule = (function () {
   function bindEvents(rerender) {
     lastRerenderFn = rerender;
     const ar = isAr();
+    const gid = getActiveGroupId();
 
     const signInBtn = document.getElementById('grp-signin-btn');
     if (signInBtn && window.GoogleSync) {
@@ -1080,25 +1195,45 @@ window.GroupsModule = (function () {
     if (profileBtn) profileBtn.onclick = () => openProfileModal(rerender);
 
     const manageBtn = document.getElementById('grp-manage-btn');
-    if (manageBtn) {
-      manageBtn.onclick = () => openManageGroupModal(getActiveGroupId(), rerender);
+    if (manageBtn) manageBtn.onclick = () => openManageGroupModal(gid, rerender);
+
+    const startSprintBtn = document.getElementById('hall-start-sprint');
+    if (startSprintBtn) startSprintBtn.onclick = () => openSprintModal(gid, rerender);
+
+    const joinSprintBtn = document.getElementById('hall-join-sprint');
+    if (joinSprintBtn) {
+      joinSprintBtn.onclick = () => {
+        const meta = groupMetaMap[gid];
+        if (!meta || !meta.sprint || !meta.sprint.endsAt) return;
+        const remMins = Math.max(1, Math.ceil((Number(meta.sprint.endsAt) - Date.now()) / 60000));
+        if (window.FocusModule && window.FocusModule.startSyncedSprint) {
+          window.FocusModule.startSyncedSprint(remMins);
+        } else {
+          window.AppState.setActiveTab('focus');
+          if (window.StudyApp) window.StudyApp.renderAll();
+        }
+      };
     }
+
+    document.querySelectorAll('[data-cheer-uid]').forEach(btn => {
+      btn.onclick = () => {
+        const uid = btn.getAttribute('data-cheer-uid');
+        const name = btn.getAttribute('data-cheer-name') || '';
+        if (uid) sendCheer(gid, uid, name);
+      };
+    });
 
     const shareBtn = document.getElementById('grp-share-invite');
     if (shareBtn) {
       shareBtn.onclick = async () => {
-        const gid = getActiveGroupId();
         const meta = groupMetaMap[gid];
         if (!meta || !meta.code) return;
         const inviteUrl = buildInviteUrl(meta.code);
         const text = ar
-          ? `انضم لمجموعة الدراسة "${meta.name}"\nالرمز: ${meta.code}\nالرابط: ${inviteUrl}`
-          : `Join my Study Group "${meta.name}"\nCode: ${meta.code}\nLink: ${inviteUrl}`;
+          ? `انضم لقاعة الدراسة "${meta.name}"\nالرمز: ${meta.code}\nالرابط: ${inviteUrl}`
+          : `Join my Study Hall "${meta.name}"\nCode: ${meta.code}\nLink: ${inviteUrl}`;
         try {
-          if (navigator.share) {
-            await navigator.share({ title: meta.name, text, url: inviteUrl });
-            return;
-          }
+          if (navigator.share) { await navigator.share({ title: meta.name, text, url: inviteUrl }); return; }
           await navigator.clipboard.writeText(text);
         } catch (e) {
           try {
@@ -1135,14 +1270,13 @@ window.GroupsModule = (function () {
       };
     });
 
-    // Attach live Firestore listener only while viewing the group tab
     attachLiveListener(rerender);
     consumePendingJoinCode(rerender);
   }
 
   function onAuthReady() {
     syncMyPresence(false);
-    if (lastRerenderFn && window.AppState && window.AppState.getActiveTab() === 'focus') {
+    if (lastRerenderFn && window.AppState && window.AppState.getActiveTab() === 'hall') {
       consumePendingJoinCode(lastRerenderFn);
     }
   }

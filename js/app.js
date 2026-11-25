@@ -3,9 +3,10 @@
  * bilingual EN/AR toggle, header sync indicator, auto-sync on resume/online, 6-tab navigation
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '61';
+  const ASSET_VER = '62';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
+    { id: 'hall', key: 'tab_hall', icon: '🏛️' },
     { id: 'stats', key: 'tab_stats', icon: '📈' },
     { id: 'challenge', key: 'tab_challenge', icon: '🎯' },
     { id: 'settings', key: 'tab_settings', icon: '⚙️' }
@@ -14,6 +15,7 @@ window.StudyApp = (function () {
   // Each tab loads only the scripts it needs on first visit
   const TAB_SCRIPTS = {
     focus: ['js/bookshelf.js', 'js/groups.js', 'js/focus.js'],
+    hall: ['js/groups.js', 'js/bookshelf.js', 'js/focus.js'],
     stats: ['js/stats.js'],
     challenge: ['js/reviews.js', 'js/challenge.js'],
     settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js']
@@ -177,7 +179,7 @@ window.StudyApp = (function () {
     });
   }
 
-  const tabDirty = { focus: true, stats: true, challenge: true, settings: true };
+  const tabDirty = { focus: true, hall: true, stats: true, challenge: true, settings: true };
   const tabScrollY = {};
   let currentMountedTab = null;
   let lastDataUpdatedAt = 0;
@@ -195,6 +197,7 @@ window.StudyApp = (function () {
 
   function isModuleReady(tabId) {
     if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule && window.GroupsModule);
+    if (tabId === 'hall') return !!window.GroupsModule;
     if (tabId === 'stats') return !!window.StatsModule;
     if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
     if (tabId === 'settings') return !!(window.SettingsModule && window.ChallengeModule);
@@ -292,7 +295,7 @@ window.StudyApp = (function () {
 
     if (currentMountedTab && currentMountedTab !== active) {
       tabScrollY[currentMountedTab] = window.scrollY || 0;
-      if (currentMountedTab === 'focus' && window.GroupsModule) {
+      if (currentMountedTab === 'hall' && window.GroupsModule) {
         window.GroupsModule.detach();
       }
     }
@@ -328,6 +331,7 @@ window.StudyApp = (function () {
       lastDataUpdatedAt = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
       let html = '';
       if (active === 'focus') html = window.FocusModule.render();
+      else if (active === 'hall') html = window.GroupsModule.render();
       else if (active === 'stats') html = window.StatsModule.render();
       else if (active === 'challenge') html = window.ChallengeModule.render();
       else if (active === 'settings') html = window.SettingsModule.render();
@@ -337,6 +341,7 @@ window.StudyApp = (function () {
 
       const scopedCb = () => renderActiveTabScoped(false);
       if (active === 'focus') window.FocusModule.bindEvents(scopedCb);
+      else if (active === 'hall') window.GroupsModule.bindEvents(scopedCb);
       else if (active === 'stats') window.StatsModule.bindEvents(scopedCb);
       else if (active === 'challenge') window.ChallengeModule.bindEvents(scopedCb);
       else if (active === 'settings') window.SettingsModule.bindEvents(scopedCb);
@@ -393,8 +398,7 @@ window.StudyApp = (function () {
       sessionStorage.setItem('study_tracker_pending_join_code', joinCode);
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
-      window.AppState.setActiveTab('focus');
-      localStorage.setItem('study_tracker_focus_bottom_view', 'group');
+      window.AppState.setActiveTab('hall');
     } catch (e) {}
   }
 
@@ -433,12 +437,8 @@ window.StudyApp = (function () {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         runBackgroundSync();
-        if (window.AppState.getActiveTab() === 'focus' && window.GroupsModule) {
-          try {
-            if (localStorage.getItem('study_tracker_focus_bottom_view') === 'group') {
-              window.GroupsModule.attachLiveListener(() => renderActiveTabScoped(false));
-            }
-          } catch (e) {}
+        if (window.AppState.getActiveTab() === 'hall' && window.GroupsModule) {
+          window.GroupsModule.attachLiveListener(() => renderActiveTabScoped(false));
         }
       } else if (window.GroupsModule) {
         window.GroupsModule.detach();

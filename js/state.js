@@ -81,7 +81,7 @@ window.AppState = (function () {
   data = createDefaultState();
   let ledgerDirty = true;
   let cachedLedger = null;
-  const VALID_TABS = new Set(['focus', 'stats', 'challenge', 'settings']);
+  const VALID_TABS = new Set(['focus', 'hall', 'stats', 'challenge', 'settings']);
   let activeTab = 'focus';
   try {
     const savedTab = localStorage.getItem('study_tracker_active_tab');
