@@ -461,13 +461,52 @@ window.AppState = (function () {
     return data;
   }
 
+  let localWriteTimer = null;
+  let hasPendingLocalWrite = false;
+
+  function flushLocalWrite() {
+    if (localWriteTimer) {
+      clearTimeout(localWriteTimer);
+      localWriteTimer = null;
+    }
+    if (!hasPendingLocalWrite) return;
+    hasPendingLocalWrite = false;
+    try {
+      localStorage.setItem(C.STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  function scheduleLocalWrite() {
+    hasPendingLocalWrite = true;
+    if (localWriteTimer) return;
+    const run = () => {
+      localWriteTimer = null;
+      flushLocalWrite();
+    };
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      localWriteTimer = setTimeout(() => window.requestIdleCallback(run, { timeout: 300 }), 80);
+    } else {
+      localWriteTimer = setTimeout(run, 120);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', flushLocalWrite);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushLocalWrite();
+    });
+  }
+
   function save(triggerSync = true, immediate = false) {
     if (triggerSync) {
       data.updatedAt = Date.now();
     }
-    try {
-      localStorage.setItem(C.STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {}
+    if (immediate) {
+      hasPendingLocalWrite = true;
+      flushLocalWrite();
+    } else {
+      scheduleLocalWrite();
+    }
     if (triggerSync) {
       if (immediate) {
         if (pushTimer) clearTimeout(pushTimer);

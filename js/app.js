@@ -2,7 +2,7 @@
  * app.js — Main entry point: instant boot, bilingual EN/AR toggle, header sync indicator,
  * auto-sync on resume/online + 10s Focus polling, 6-tab navigation
  */
-window.StudyApp = (function() {
+window.StudyApp = (function () {
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'tasks', key: 'tab_tasks', icon: '✅' },
@@ -11,14 +11,14 @@ window.StudyApp = (function() {
     { id: 'challenge', key: 'tab_challenge', icon: '🏆' },
     { id: 'settings', key: 'tab_settings', icon: '⚙️' }
   ];
-  
+
   let lastHeaderSig = "";
   let lastNavLang = "";
-  
+
   function t(key, vars) {
     return window.I18n ? window.I18n.t(key, vars) : key;
   }
-  
+
   function renderHeader() {
     const today = window.LedgerEngine.getTodaySummary();
     const isDark = window.AppState.getIsDark();
@@ -27,19 +27,19 @@ window.StudyApp = (function() {
     const hasSync = !!syncCfg.token;
     const isAr = window.I18n && window.I18n.isRTL();
     const hUnit = t('hrs');
-    
+
     const titleEl = document.getElementById('app-header-title');
     if (titleEl) titleEl.textContent = t('appTitle');
-    
+
     const syncIcon = syncStatus.state === 'syncing' ? '🔄' : (syncStatus.state === 'error' ? '⚠️' : '☁️');
-    const syncBtnHtml = hasSync ?
-      `<button id="header-sync-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(t('syncNowTitle'))}">${syncIcon}</button>` :
-      '';
-    
+    const syncBtnHtml = hasSync
+      ? `<button id="header-sync-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(t('syncNowTitle'))}">${syncIcon}</button>`
+      : '';
+
     const headerSig = `${today.logged}|${today.target}|${isDark}|${hasSync}|${syncStatus.state}|${isAr}`;
     if (headerSig === lastHeaderSig) return;
     lastHeaderSig = headerSig;
-    
+
     const headerEl = document.getElementById('app-header-meta');
     if (headerEl) {
       headerEl.innerHTML = `
@@ -54,7 +54,7 @@ window.StudyApp = (function() {
           ${isDark ? '☀️' : '🌙'}
         </button>
       `;
-      
+
       const syncBtn = document.getElementById('header-sync-btn');
       if (syncBtn) {
         syncBtn.onclick = async () => {
@@ -62,7 +62,7 @@ window.StudyApp = (function() {
           if (res && res.updated) renderAll();
         };
       }
-      
+
       const langBtn = document.getElementById('lang-toggle-btn');
       if (langBtn) {
         langBtn.onclick = () => {
@@ -71,7 +71,7 @@ window.StudyApp = (function() {
           renderAll();
         };
       }
-      
+
       const btn = document.getElementById('theme-toggle-btn');
       if (btn) {
         btn.onclick = () => {
@@ -81,12 +81,12 @@ window.StudyApp = (function() {
       }
     }
   }
-  
+
   function renderNav() {
     const active = window.AppState.getActiveTab();
     const navEl = document.getElementById('app-bottom-nav');
     if (!navEl) return;
-    
+
     const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
     if (!navEl.children.length || lastNavLang !== curLang) {
       lastNavLang = curLang;
@@ -97,19 +97,18 @@ window.StudyApp = (function() {
           <span>${t(tab.key)}</span>
         </button>
       `).join('');
-      
+
       navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
         btn.onclick = () => {
           const nextTab = btn.getAttribute('data-tab-id');
           if (nextTab === window.AppState.getActiveTab()) return;
           window.AppState.setActiveTab(nextTab);
           renderNav();
-          renderMain(true);
-          window.scrollTo(0, 0);
+          renderMain(true, false);
         };
       });
     }
-    
+
     navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
       const isAct = btn.getAttribute('data-tab-id') === active;
       btn.classList.toggle('text-indigo-600', isAct);
@@ -119,48 +118,87 @@ window.StudyApp = (function() {
       btn.classList.toggle('dark:text-slate-400', !isAct);
     });
   }
-  
-  function renderMain(animate = false) {
+
+  const tabDirty = { focus: true, tasks: true, habits: true, stats: true, challenge: true, settings: true };
+  const tabScrollY = {};
+  let currentMountedTab = null;
+
+  function markAllTabsDirty(exceptTab = null) {
+    TABS.forEach(tb => {
+      if (tb.id !== exceptTab) tabDirty[tb.id] = true;
+    });
+  }
+
+  function ensureTabPanels(mainEl) {
+    if (mainEl.querySelector('[data-tab-panel]')) return;
+    mainEl.innerHTML = TABS.map(tb => `<div id="tab-panel-${tb.id}" data-tab-panel="${tb.id}" class="hidden"></div>`).join('');
+  }
+
+  function renderMain(animate = false, forceCurrent = false) {
     const active = window.AppState.getActiveTab();
     const mainEl = document.getElementById('app-main');
     if (!mainEl) return;
-    
-    if (animate) {
-      mainEl.classList.remove('tab-animate');
-      requestAnimationFrame(() => mainEl.classList.add('tab-animate'));
+    ensureTabPanels(mainEl);
+
+    if (currentMountedTab && currentMountedTab !== active) {
+      tabScrollY[currentMountedTab] = window.scrollY || 0;
     }
-    
-    let html = '';
-    if (active === 'focus') html = window.FocusModule.render();
-    else if (active === 'tasks') html = window.TasksModule.render();
-    else if (active === 'habits') html = window.HabitsModule.render();
-    else if (active === 'stats') html = window.StatsModule.render();
-    else if (active === 'challenge') html = window.ChallengeModule.render();
-    else if (active === 'settings') html = window.SettingsModule.render();
-    
-    mainEl.innerHTML = html;
-    
-    if (active === 'focus') window.FocusModule.bindEvents(renderAll);
-    else if (active === 'tasks') window.TasksModule.bindEvents(renderAll);
-    else if (active === 'habits') window.HabitsModule.bindEvents(renderAll);
-    else if (active === 'stats') window.StatsModule.bindEvents(renderAll);
-    else if (active === 'challenge') window.ChallengeModule.bindEvents(renderAll);
-    else if (active === 'settings') window.SettingsModule.bindEvents(renderAll);
+
+    TABS.forEach(tb => {
+      const panel = document.getElementById('tab-panel-' + tb.id);
+      if (!panel) return;
+      if (tb.id === active) panel.classList.remove('hidden');
+      else panel.classList.add('hidden');
+    });
+
+    const activePanel = document.getElementById('tab-panel-' + active);
+    if (!activePanel) return;
+
+    const needsBuild = forceCurrent || tabDirty[active] || !activePanel.children.length;
+    if (needsBuild) {
+      let html = '';
+      if (active === 'focus') html = window.FocusModule.render();
+      else if (active === 'tasks') html = window.TasksModule.render();
+      else if (active === 'habits') html = window.HabitsModule.render();
+      else if (active === 'stats') html = window.StatsModule.render();
+      else if (active === 'challenge') html = window.ChallengeModule.render();
+      else if (active === 'settings') html = window.SettingsModule.render();
+
+      activePanel.innerHTML = html;
+      tabDirty[active] = false;
+
+      if (active === 'focus') window.FocusModule.bindEvents(renderAll);
+      else if (active === 'tasks') window.TasksModule.bindEvents(renderAll);
+      else if (active === 'habits') window.HabitsModule.bindEvents(renderAll);
+      else if (active === 'stats') window.StatsModule.bindEvents(renderAll);
+      else if (active === 'challenge') window.ChallengeModule.bindEvents(renderAll);
+      else if (active === 'settings') window.SettingsModule.bindEvents(renderAll);
+    }
+
+    if (animate && currentMountedTab !== active) {
+      activePanel.classList.remove('tab-animate');
+      requestAnimationFrame(() => activePanel.classList.add('tab-animate'));
+      const savedY = tabScrollY[active] || 0;
+      window.scrollTo(0, savedY);
+    }
+    currentMountedTab = active;
   }
-  
+
   function renderAll(animate = false) {
+    const active = window.AppState.getActiveTab();
+    markAllTabsDirty();
     renderHeader();
-    renderMain(animate);
+    renderMain(animate, true);
     renderNav();
   }
-  
+
   function isUserEditingOrModalOpen() {
     const backdrop = document.getElementById('app-modal-backdrop');
     if (backdrop && !backdrop.classList.contains('hidden')) return true;
     const el = document.activeElement;
     return !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'));
   }
-  
+
   async function runBackgroundSync() {
     try {
       const cfg = window.AppState.getSyncConfig();
@@ -176,11 +214,11 @@ window.StudyApp = (function() {
       }
     } catch (e) {}
   }
-  
+
   function loadOptionalEnhancementsInBackground() {
     setTimeout(() => {
       runBackgroundSync();
-      
+
       try {
         const isTelegramEnv = /Telegram/i.test(navigator.userAgent || '') ||
           (window.location && /tgWebApp/i.test(window.location.hash + window.location.search));
@@ -197,19 +235,19 @@ window.StudyApp = (function() {
       } catch (e) {}
     }, 120);
   }
-  
+
   function init() {
     window.AppState.initThemeAndTelegram();
     window.AppState.load();
     if (window.PushManagerClient) window.PushManagerClient.registerServiceWorker();
-    
+
     const modalBackdrop = document.getElementById('app-modal-backdrop');
     if (modalBackdrop) {
       modalBackdrop.addEventListener('click', (e) => {
         if (e.target === modalBackdrop) window.AppUI.closeModal();
       });
     }
-    
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         runBackgroundSync();
@@ -218,21 +256,22 @@ window.StudyApp = (function() {
     window.addEventListener('online', () => {
       runBackgroundSync();
     });
-    
+
     setInterval(() => {
       if (document.visibilityState === 'visible' && window.AppState.getActiveTab() === 'focus') {
         runBackgroundSync();
       }
     }, 60000);
-    
+
     renderAll();
     loadOptionalEnhancementsInBackground();
   }
-  
+
   return {
     init,
     renderAll,
-    renderHeader
+    renderHeader,
+    markOtherTabsDirty: () => markAllTabsDirty(window.AppState.getActiveTab())
   };
 })();
 

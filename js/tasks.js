@@ -128,28 +128,47 @@ window.TasksModule = (function () {
     const sbSel = document.getElementById('task-filter-subject');
     if (sbSel) sbSel.onchange = (e) => { filterSubject = e.target.value; rerender(); };
 
-    document.querySelectorAll('[data-toggle-task]').forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.getAttribute('data-toggle-task');
-        const task = window.AppState.getData().tasks.find(tk => tk.id === id);
-        if (task) {
+    const panel = document.getElementById('tab-panel-tasks') || document.getElementById('app-main');
+    if (panel) {
+      panel.onclick = (e) => {
+        const toggleBtn = e.target && e.target.closest ? e.target.closest('[data-toggle-task]') : null;
+        if (toggleBtn) {
+          const id = toggleBtn.getAttribute('data-toggle-task');
+          const task = window.AppState.getData().tasks.find(tk => tk.id === id);
+          if (!task) return;
           task.done = !task.done;
+          window.AppState.save();
+          if (filterStatus === 'all') {
+            // Surgical DOM patch without full re-render!
+            toggleBtn.classList.toggle('bg-emerald-500', task.done);
+            toggleBtn.classList.toggle('border-emerald-500', task.done);
+            toggleBtn.classList.toggle('text-white', task.done);
+            toggleBtn.classList.toggle('border-slate-300', !task.done);
+            toggleBtn.classList.toggle('dark:border-slate-600', !task.done);
+            toggleBtn.textContent = task.done ? '✓' : '';
+            const row = toggleBtn.closest('.flex');
+            const titleEl = row && row.querySelector('p, .text-sm');
+            if (titleEl) {
+              titleEl.classList.toggle('line-through', task.done);
+              titleEl.classList.toggle('text-slate-400', task.done);
+            }
+            if (window.StudyApp && window.StudyApp.markOtherTabsDirty) window.StudyApp.markOtherTabsDirty();
+          } else {
+            rerender();
+          }
+          return;
+        }
+        const delBtn = e.target && e.target.closest ? e.target.closest('[data-delete-task]') : null;
+        if (delBtn) {
+          const id = delBtn.getAttribute('data-delete-task');
+          const data = window.AppState.getData();
+          data.tasks = data.tasks.filter(tk => tk.id !== id);
+          window.AppState.markDeleted(id);
           window.AppState.save();
           rerender();
         }
       };
-    });
-
-    document.querySelectorAll('[data-delete-task]').forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.getAttribute('data-delete-task');
-        const data = window.AppState.getData();
-        data.tasks = data.tasks.filter(tk => tk.id !== id);
-        window.AppState.markDeleted(id);
-        window.AppState.save();
-        rerender();
-      };
-    });
+    }
   }
 
   return {

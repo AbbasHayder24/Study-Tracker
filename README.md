@@ -1,4 +1,4 @@
-# Study Tracker — 6-Month Challenge (182 Days / 1,066 Hours)
+# Academic Study Tracker — 6-Month Challenge (182 Days / 1,066 Hours)
 
 An offline-first interactive web app built with **HTML + Local CSS + Vanilla JavaScript**, split into **16 modular files**. Runs 100% locally in the browser via `localStorage` with instant dark mode, inline SVG bookshelf, and Telegram Mini App support.
 

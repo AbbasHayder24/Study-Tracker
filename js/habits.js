@@ -135,41 +135,43 @@ window.HabitsModule = (function () {
       };
     }
 
-    document.querySelectorAll('[data-toggle-habit]').forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.getAttribute('data-toggle-habit');
-        const todayISO = window.AppState.getLocalTodayISO();
-        const habit = window.AppState.getData().habits.find(h => h.id === id);
-        if (habit) {
-          habit.completions[todayISO] = !habit.completions[todayISO];
+    const panel = document.getElementById('tab-panel-habits') || document.getElementById('app-main');
+    if (panel) {
+      panel.onclick = (e) => {
+        const tBtn = e.target && e.target.closest ? e.target.closest('[data-toggle-habit]') : null;
+        if (tBtn) {
+          const id = tBtn.getAttribute('data-toggle-habit');
+          const todayISO = window.AppState.getLocalTodayISO();
+          const habit = window.AppState.getData().habits.find(h => h.id === id);
+          if (habit) {
+            habit.completions[todayISO] = !habit.completions[todayISO];
+            window.AppState.save();
+            rerender();
+          }
+          return;
+        }
+        const dBtn = e.target && e.target.closest ? e.target.closest('[data-habit-day]') : null;
+        if (dBtn) {
+          const [id, iso] = dBtn.getAttribute('data-habit-day').split('|');
+          const habit = window.AppState.getData().habits.find(h => h.id === id);
+          if (habit) {
+            habit.completions[iso] = !habit.completions[iso];
+            window.AppState.save();
+            rerender();
+          }
+          return;
+        }
+        const delBtn = e.target && e.target.closest ? e.target.closest('[data-delete-habit]') : null;
+        if (delBtn) {
+          const id = delBtn.getAttribute('data-delete-habit');
+          const data = window.AppState.getData();
+          data.habits = data.habits.filter(h => h.id !== id);
+          window.AppState.markDeleted(id);
           window.AppState.save();
           rerender();
         }
       };
-    });
-
-    document.querySelectorAll('[data-habit-day]').forEach(btn => {
-      btn.onclick = () => {
-        const [id, iso] = btn.getAttribute('data-habit-day').split('|');
-        const habit = window.AppState.getData().habits.find(h => h.id === id);
-        if (habit) {
-          habit.completions[iso] = !habit.completions[iso];
-          window.AppState.save();
-          rerender();
-        }
-      };
-    });
-
-    document.querySelectorAll('[data-delete-habit]').forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.getAttribute('data-delete-habit');
-        const data = window.AppState.getData();
-        data.habits = data.habits.filter(h => h.id !== id);
-        window.AppState.markDeleted(id);
-        window.AppState.save();
-        rerender();
-      };
-    });
+    }
   }
 
   return {
