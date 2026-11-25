@@ -1,8 +1,8 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v44';
-const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
+const APP_CACHE = 'study-tracker-shell-v48';
+const PUSH_META_CACHE = 'study-tracker-push-meta-v48';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
 const CORE_ASSETS = [

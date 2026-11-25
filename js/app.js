@@ -24,7 +24,7 @@ window.StudyApp = (function () {
     const isDark = window.AppState.getIsDark();
     const syncCfg = window.AppState.getSyncConfig();
     const syncStatus = window.AppState.getSyncStatus();
-    const hasSync = !!syncCfg.token;
+    const hasSync = !!(window.GoogleSync && window.GoogleSync.getUser());
     const isAr = window.I18n && window.I18n.isRTL();
     const hUnit = t('hrs');
 
@@ -58,7 +58,7 @@ window.StudyApp = (function () {
       const syncBtn = document.getElementById('header-sync-btn');
       if (syncBtn) {
         syncBtn.onclick = async () => {
-          const res = await window.AppState.syncNow(false);
+          const res = window.GoogleSync ? await window.GoogleSync.syncNow(false) : null;
           if (res && res.updated) renderAll();
         };
       }
@@ -201,9 +201,8 @@ window.StudyApp = (function () {
 
   async function runBackgroundSync() {
     try {
-      const cfg = window.AppState.getSyncConfig();
-      if (!cfg.token) return;
-      const res = await window.AppState.syncNow(true);
+      if (!window.GoogleSync || !window.GoogleSync.getUser()) return;
+      const res = await window.GoogleSync.syncNow(true);
       if (res && res.ok && res.updated) {
         if (!isUserEditingOrModalOpen()) {
           renderAll();

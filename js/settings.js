@@ -70,66 +70,6 @@ window.SettingsModule = (function () {
           </div>
         </div>
 
-        <!-- Smart Cloud Auto-Sync -->
-        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-1.5">
-              <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('smartAutoSync')}</h3>
-              ${window.AppUI.infoButtonHtml('info-sync-btn')}
-            </div>
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${isConnected ? 'bg-emerald-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300'}">
-              ${isConnected ? (lastTime ? t('syncedAt', { t: lastTime }) : t('connected')) : t('off')}
-            </span>
-          </div>
-
-          <input id="sync-token-input" type="password" dir="ltr" value="${window.AppUI.escapeHtml(syncCfg.token)}" placeholder="${window.AppUI.escapeHtml(t('tokenPlaceholder'))}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-mono"/>
-
-          <div class="grid grid-cols-2 gap-2">
-            <button id="sync-connect-btn" type="button" class="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">
-              ${isConnected ? t('syncNowBtn') : t('connectSyncBtn')}
-            </button>
-            ${isConnected ? `
-              <button id="sync-disconnect-btn" type="button" class="py-2.5 px-3 rounded-xl bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 text-xs font-bold">
-                ${t('disconnect')}
-              </button>
-            ` : `
-              <button id="sync-test-btn" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">
-                ${t('howItWorks')}
-              </button>
-            `}
-          </div>
-          ${syncStatus.lastError ? `<div class="text-[11px] text-rose-500">${window.AppUI.escapeHtml(syncStatus.lastError)}</div>` : ''}
-        </div>
-
-        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
-          <div class="flex items-center gap-1.5">
-            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('notifSoundTitle')}</h3>
-            ${window.AppUI.infoButtonHtml('info-notif-btn')}
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <button id="setting-toggle-sound" class="py-2.5 px-3 rounded-xl text-xs font-bold ${settings.soundEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
-              ${settings.soundEnabled ? t('soundOn') : t('soundOff')}
-            </button>
-            <button id="setting-test-sound" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
-              ${t('testChime')}
-            </button>
-          </div>
-          <button id="setting-enable-notif" class="w-full py-2.5 px-3 rounded-xl text-xs font-bold ${notifGranted ? 'bg-emerald-600 text-white' : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'}">
-            ${notifGranted ? t('notifActive') : t('enableNotif')}
-          </button>
-          <div class="pt-2 border-t border-slate-100 dark:border-slate-700 space-y-2">
-            <div class="text-[11px] font-bold text-slate-600 dark:text-slate-300">${t('pushSectionLabel')}</div>
-            <div class="grid grid-cols-2 gap-2">
-              <button id="setting-toggle-push" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold ${pushActive ? 'bg-emerald-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}">
-                ${pushActive ? t('pushActiveBtn') : t('pushEnableBtn')}
-              </button>
-              <button id="setting-test-push" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
-                ${t('pushTestBtn')}
-              </button>
-            </div>
-          </div>
-        </div>
-
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${isAr() ? '☁️ المزامنة بحساب Google' : '☁️ Google Account Sync'}</h3>
@@ -315,64 +255,6 @@ window.SettingsModule = (function () {
         window.I18n.setLang('ar', true, true);
         window.AppState.markLedgerDirty();
         rerender();
-      };
-    }
-
-    const infoSyncBtn = document.getElementById('info-sync-btn');
-    if (infoSyncBtn) infoSyncBtn.onclick = showSyncInfo;
-
-    const testSyncInfoBtn = document.getElementById('sync-test-btn');
-    if (testSyncInfoBtn) testSyncInfoBtn.onclick = showSyncInfo;
-
-    const connectBtn = document.getElementById('sync-connect-btn');
-    if (connectBtn) {
-      connectBtn.onclick = async () => {
-        const token = document.getElementById('sync-token-input').value.trim();
-        if (!token) {
-          window.AppUI.showToast(t('pasteTokenFirst'), 'warning');
-          return;
-        }
-        const existingCfg = window.AppState.getSyncConfig();
-        const sameToken = existingCfg.token === token;
-        window.AppState.setSyncConfig(token, sameToken ? existingCfg.gistId : '');
-        window.AppUI.showToast(t('syncingToast'), 'info');
-        await window.AppState.syncNow(false);
-        rerender();
-      };
-    }
-
-    const disconnectBtn = document.getElementById('sync-disconnect-btn');
-    if (disconnectBtn) {
-      disconnectBtn.onclick = () => {
-        window.AppState.clearSyncConfig();
-        window.AppUI.showToast(t('syncDisconnected'), 'warning');
-        rerender();
-      };
-    }
-
-    const infoNotifBtn = document.getElementById('info-notif-btn');
-    if (infoNotifBtn) {
-      infoNotifBtn.onclick = () => {
-        window.AppUI.showInfo(t('notifSoundTitle'), t('notifInfoBody'));
-      };
-    }
-
-    const soundToggle = document.getElementById('setting-toggle-sound');
-    if (soundToggle) {
-      soundToggle.onclick = () => {
-        const data = window.AppState.getData();
-        data.settings.soundEnabled = !data.settings.soundEnabled;
-        window.AppState.save();
-        if (data.settings.soundEnabled) window.AppUI.playChime();
-        rerender();
-      };
-    }
-
-    const testSoundBtn = document.getElementById('setting-test-sound');
-    if (testSoundBtn) {
-      testSoundBtn.onclick = () => {
-        window.AppUI.playChime();
-        window.AppUI.showToast(t('chimePlayed'), 'info');
       };
     }
 
