@@ -367,6 +367,9 @@ window.AppState = (function () {
     if (triggerSync && window.GoogleSync && typeof window.GoogleSync.onLocalSave === 'function') {
       window.GoogleSync.onLocalSave(immediate);
     }
+    if (triggerSync && window.GroupsModule && typeof window.GroupsModule.schedulePresenceSync === 'function') {
+      window.GroupsModule.schedulePresenceSync(immediate);
+    }
   }
 
   function getData() { return data; }

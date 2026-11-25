@@ -141,6 +141,9 @@ window.StudyApp = (function () {
 
     if (currentMountedTab && currentMountedTab !== active) {
       tabScrollY[currentMountedTab] = window.scrollY || 0;
+      if (currentMountedTab === 'challenge' && window.GroupsModule) {
+        window.GroupsModule.detach();
+      }
     }
 
     TABS.forEach(tb => {
@@ -238,6 +241,9 @@ window.StudyApp = (function () {
   function init() {
     window.AppState.initThemeAndTelegram();
     window.AppState.load();
+    if (window.GroupsModule && window.GroupsModule.checkJoinLink) {
+      window.GroupsModule.checkJoinLink();
+    }
     if (window.PushManagerClient) window.PushManagerClient.registerServiceWorker();
 
     const modalBackdrop = document.getElementById('app-modal-backdrop');
@@ -250,6 +256,15 @@ window.StudyApp = (function () {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         runBackgroundSync();
+        if (window.AppState.getActiveTab() === 'challenge' && window.GroupsModule) {
+          try {
+            if (localStorage.getItem('study_tracker_challenge_subview') === 'group') {
+              window.GroupsModule.attachLiveListener(renderAll);
+            }
+          } catch (e) {}
+        }
+      } else if (window.GroupsModule) {
+        window.GroupsModule.detach();
       }
     });
     window.addEventListener('online', () => {

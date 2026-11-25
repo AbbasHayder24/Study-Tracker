@@ -5,7 +5,7 @@ window.ChallengeModule = (function () {
   let subView = 'summary';
   try {
     const savedSub = localStorage.getItem('study_tracker_challenge_subview');
-    if (savedSub === 'summary' || savedSub === 'log' || savedSub === 'reviews') subView = savedSub;
+    if (savedSub === 'summary' || savedSub === 'log' || savedSub === 'reviews' || savedSub === 'group') subView = savedSub;
   } catch (e) {}
   let selectedWeek = 'all';
 
@@ -310,15 +310,19 @@ window.ChallengeModule = (function () {
 
     return `
       <div class="space-y-4">
-        <div class="flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-          <button data-ch-sub="summary" class="flex-1 py-2 rounded-lg text-xs font-bold transition ${subView === 'summary' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('summaryTab')}</button>
-          <button data-ch-sub="log" class="flex-1 py-2 rounded-lg text-xs font-bold transition ${subView === 'log' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('logTabDynamic', { n: ledger.totalDays })}</button>
-          <button data-ch-sub="reviews" class="flex-1 py-2 rounded-lg text-xs font-bold transition ${subView === 'reviews' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('reviewsTab')}</button>
+        <div class="flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 gap-0.5">
+          <button data-ch-sub="summary" class="flex-1 py-2 px-1 rounded-lg text-[11px] font-bold transition ${subView === 'summary' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('summaryTab')}</button>
+          <button data-ch-sub="log" class="flex-1 py-2 px-1 rounded-lg text-[11px] font-bold transition ${subView === 'log' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('logTabDynamic', { n: ledger.totalDays })}</button>
+          <button data-ch-sub="reviews" class="flex-1 py-2 px-1 rounded-lg text-[11px] font-bold transition ${subView === 'reviews' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('reviewsTab')}</button>
+          <button data-ch-sub="group" class="flex-1 py-2 px-1 rounded-lg text-[11px] font-bold transition ${subView === 'group' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
+            ${(window.I18n && window.I18n.isRTL()) ? 'المجموعة' : 'Group'}${(() => { const n = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0; return n > 0 ? ` <span class="text-[9px]">🟢${n}</span>` : ''; })()}
+          </button>
         </div>
 
         ${subView === 'summary' ? renderSummary(ledger) : ''}
         ${subView === 'log' ? renderDailyLog(ledger) : ''}
         ${subView === 'reviews' ? window.ReviewsModule.render(ledger) : ''}
+        ${subView === 'group' && window.GroupsModule ? window.GroupsModule.render() : ''}
       </div>
     `;
   }
@@ -350,7 +354,11 @@ window.ChallengeModule = (function () {
 
     document.querySelectorAll('[data-ch-sub]').forEach(btn => {
       btn.onclick = () => {
-        subView = btn.getAttribute('data-ch-sub');
+        const nextSub = btn.getAttribute('data-ch-sub');
+        if (subView === 'group' && nextSub !== 'group' && window.GroupsModule) {
+          window.GroupsModule.detach();
+        }
+        subView = nextSub;
         try { localStorage.setItem('study_tracker_challenge_subview', subView); } catch (e) {}
         rerender();
       };
@@ -427,6 +435,11 @@ window.ChallengeModule = (function () {
 
     if (subView === 'reviews') {
       window.ReviewsModule.bindEvents(ledger, rerender);
+    }
+    if (subView === 'group' && window.GroupsModule) {
+      window.GroupsModule.bindEvents(rerender);
+    } else if (window.GroupsModule) {
+      window.GroupsModule.detach();
     }
   }
 

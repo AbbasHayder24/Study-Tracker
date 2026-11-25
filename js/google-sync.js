@@ -126,6 +126,9 @@ window.GoogleSync = (function () {
               localStorage.setItem('study_tracker_google_uid', currentUser.uid);
               sessionStorage.removeItem('study_tracker_google_redirect');
             } catch (e) {}
+            if (window.GroupsModule && window.GroupsModule.onAuthReady) {
+              window.GroupsModule.onAuthReady(currentUser);
+            }
             if (prevUid !== currentUser.uid && window.StudyApp && window.StudyApp.renderAll) {
               window.StudyApp.renderAll();
             }
@@ -141,6 +144,9 @@ window.GoogleSync = (function () {
           } else {
             try { localStorage.removeItem('study_tracker_google_uid'); } catch (e) {}
             updateStatus({ state: 'idle', lastError: '' });
+            if (window.GroupsModule && window.GroupsModule.onSignOut) {
+              window.GroupsModule.onSignOut();
+            }
             if (prevUid && window.StudyApp && window.StudyApp.renderAll) {
               window.StudyApp.renderAll();
             }
@@ -252,6 +258,9 @@ window.GoogleSync = (function () {
 
       pendingPush = false;
       updateStatus({ state: 'ok', lastSyncedAt: Date.now(), lastError: '' });
+      if (window.GroupsModule && window.GroupsModule.syncMyPresence) {
+        window.GroupsModule.syncMyPresence(false);
+      }
 
       if (!silent && window.AppUI) {
         window.AppUI.showToast(
@@ -396,6 +405,12 @@ window.GoogleSync = (function () {
     } : null;
   }
 
+  async function ensureReady() {
+    if (!isConfigured()) return null;
+    await ensureInit();
+    return { auth, db, user: currentUser };
+  }
+
   // Pre-initialize Firebase SDK right away when online so signInWithPopup preserves User Gesture
   if (typeof window !== 'undefined') {
     const bootInit = () => {
@@ -429,6 +444,7 @@ window.GoogleSync = (function () {
     signOut,
     syncNow,
     onLocalSave,
-    ensureReadyAndSync
+    ensureReadyAndSync,
+    ensureReady
   };
 })();
