@@ -2,11 +2,11 @@
  * state.js — Full-Coverage Smart Auto-Sync:
  * Syncs language, theme, focus prefs, activeTimer, settings, subjects, tags, books, tasks,
  * habits (including unchecks), dailyLogs (including zeroing), reviews, startDate,
- * and deletedIds tombstones.
+ * resolvedPenalties, and deletedIds tombstones.
  */
 window.AppState = (function () {
   const C = window.APP_CONFIG;
-      let data = null;
+  let data = null;
 
   function getLocalTodayISO(dateObj) {
     let d;
@@ -75,7 +75,8 @@ window.AppState = (function () {
         { id: 'hab_2', title: 'Clear desk before studying', icon: '🧹', targetDaysPerWeek: 6, completions: {} },
         { id: 'hab_3', title: 'Write end-of-day summary', icon: '📝', targetDaysPerWeek: 5, completions: {} }
       ],
-      reviews: {}
+      reviews: {},
+      resolvedPenalties: {}
     };
   }
 
@@ -84,9 +85,6 @@ window.AppState = (function () {
   let cachedLedger = null;
   let activeTab = 'focus';
   let isDark = false;
-  let pushTimer = null;
-  let syncInFlight = false;
-  let pendingPush = false;
   let syncStatus = { state: 'idle', lastSyncedAt: null, lastError: '' };
 
   function markLedgerDirty() { ledgerDirty = true; }
@@ -103,17 +101,50 @@ window.AppState = (function () {
   }
 
   function getSyncConfig() { return { token: '', gistId: '' }; }
-
   function setSyncConfig() {}
-
   function clearSyncConfig() {}
 
   function getSyncStatus() {
     return syncStatus;
   }
 
+  function setSyncStatus(next) {
+    syncStatus = { ...syncStatus, ...(next || {}) };
+    if (window.StudyApp && window.StudyApp.renderHeader) {
+      window.StudyApp.renderHeader();
+    }
+  }
+
+  function hasStudyContent(stateObj) {
+    if (!stateObj || typeof stateObj !== 'object') return false;
+    if (Array.isArray(stateObj.books) && stateObj.books.length > 0) return true;
+    if (Array.isArray(stateObj.tasks) && stateObj.tasks.length > 0) return true;
+    if (stateObj.dailyLogs && Object.keys(stateObj.dailyLogs).length > 0) return true;
+    if (stateObj.reviews && Object.keys(stateObj.reviews).length > 0) return true;
+    if (stateObj.resolvedPenalties && Object.keys(stateObj.resolvedPenalties).length > 0) return true;
+    if (stateObj.activeTimer && stateObj.activeTimer.isRunning) return true;
+    if (Array.isArray(stateObj.habits)) {
+      for (const h of stateObj.habits) {
+        if (h && h.completions && Object.keys(h.completions).length > 0) return true;
+      }
+    }
+    return false;
+  }
+
   function mergeData(local, remote) {
-    const localNewer = (Number(local.updatedAt) || 0) >= (Number(remote.updatedAt) || 0);
+    const localHasData = hasStudyContent(local);
+    const remoteHasData = hasStudyContent(remote);
+
+    // Protect cloud data when signing in from a fresh/empty device that only changed theme/lang
+    let localNewer;
+    if (!localHasData && remoteHasData) {
+      localNewer = false;
+    } else if (localHasData && !remoteHasData) {
+      localNewer = true;
+    } else {
+      localNewer = (Number(local.updatedAt) || 0) >= (Number(remote.updatedAt) || 0);
+    }
+
     const primary = localNewer ? local : remote;
     const secondary = localNewer ? remote : local;
 
@@ -175,6 +206,11 @@ window.AppState = (function () {
       }
     });
 
+    const resolvedPenalties = {
+      ...(secondary.resolvedPenalties || {}),
+      ...(primary.resolvedPenalties || {})
+    };
+
     const lSdTs = Number(local.startDateUpdatedAt) || 0;
     const rSdTs = Number(remote.startDateUpdatedAt) || 0;
     let resolvedStartDate = primary.startDate;
@@ -191,6 +227,19 @@ window.AppState = (function () {
     const rTimerTs = rTimer ? (Number(rTimer.updatedAt) || 0) : 0;
     const resolvedTimer = lTimerTs >= rTimerTs ? lTimer : rTimer;
 
+    const mergedSettings = {
+      ...(secondary.settings || {}),
+      ...(primary.settings || {}),
+      challenge: (primary.settings && primary.settings.challenge) || (secondary.settings && secondary.settings.challenge) || null
+    };
+    // Avoid overwriting an explicit lang/theme with null
+    if (mergedSettings.lang == null && secondary.settings && secondary.settings.lang != null) {
+      mergedSettings.lang = secondary.settings.lang;
+    }
+    if (mergedSettings.theme == null && secondary.settings && secondary.settings.theme != null) {
+      mergedSettings.theme = secondary.settings.theme;
+    }
+
     return {
       ...primary,
       startDate: resolvedStartDate,
@@ -198,30 +247,16 @@ window.AppState = (function () {
       updatedAt: Math.max(Number(local.updatedAt) || 0, Number(remote.updatedAt) || 0),
       deletedIds: Array.from(deletedSet).slice(-1000),
       activeTimer: resolvedTimer,
-      settings: {
-        ...(secondary.settings || {}),
-        ...(primary.settings || {}),
-        challenge: (primary.settings && primary.settings.challenge) || (secondary.settings && secondary.settings.challenge) || null
-      },
+      settings: mergedSettings,
       tags: mergeById(secondary.tags, primary.tags),
       subjects: mergeById(secondary.subjects, primary.subjects),
       dailyLogs,
       books: mergeById(secondary.books, primary.books),
       tasks: mergeById(secondary.tasks, primary.tasks),
       habits: Array.from(habitMap.values()),
-      reviews
+      reviews,
+      resolvedPenalties
     };
-  }
-
-  function scheduleCloudPush() {
-    // Cloud sync is handled automatically by GoogleSync (Firebase Firestore)
-  }
-
-  async function syncNow(silent = false) {
-    if (window.GoogleSync && typeof window.GoogleSync.syncNow === 'function') {
-      return window.GoogleSync.syncNow(silent);
-    }
-    return { ok: false, error: 'Not connected' };
   }
 
   function applySyncedPreferences() {
@@ -240,52 +275,11 @@ window.AppState = (function () {
   }
 
   async function syncNow(silent = false) {
-    if (syncInFlight) return { ok: false, skipped: true };
-    let cfg = getSyncConfig();
-    if (!cfg.token) return { ok: false, error: 'Not connected' };
-
-    syncInFlight = true;
-    syncStatus.state = 'syncing';
-    syncStatus.lastError = '';
-    if (window.StudyApp && window.StudyApp.renderHeader) window.StudyApp.renderHeader();
-
-    try {
-      if (!cfg.gistId) {
-        const foundId = await findExistingGist(cfg.token);
-        if (foundId) {
-          setSyncConfig(cfg.token, foundId);
-          cfg = getSyncConfig();
-        }
-      }
-
-      let updatedUI = false;
-      if (cfg.gistId) {
-        const pullRes = await pullFromGist(false);
-        if (!pullRes.ok) return pullRes;
-        updatedUI = !!pullRes.updated;
-        if (pendingPush || pullRes.needsPush) {
-          const pushRes = await pushToGist(true);
-          if (!pushRes.ok) return pushRes;
-        }
-      } else {
-        const createRes = await pushToGist(true);
-        if (!createRes.ok) return createRes;
-      }
-
-      syncStatus = { state: 'ok', lastSyncedAt: Date.now(), lastError: '' };
-      if (!silent && window.AppUI) {
-        window.AppUI.showToast(updatedUI ? (window.I18n ? window.I18n.t('mergedAndSynced') : 'Merged & synced ☁️') : (window.I18n ? window.I18n.t('upToDate') : 'Everything is up to date ☁️'), 'success');
-      }
-      return { ok: true, updated: updatedUI };
-    } finally {
-      syncInFlight = false;
-      if (window.StudyApp && window.StudyApp.renderHeader) window.StudyApp.renderHeader();
-      if (pendingPush && syncStatus.state !== 'error') {
-        setTimeout(() => syncNow(true), 300);
-      }
+    if (window.GoogleSync && typeof window.GoogleSync.syncNow === 'function') {
+      return window.GoogleSync.syncNow(silent);
     }
+    return { ok: false, error: 'Not connected' };
   }
-
 
   function load() {
     try {
@@ -365,20 +359,14 @@ window.AppState = (function () {
     } else {
       scheduleLocalWrite();
     }
-    if (triggerSync) {
-      if (immediate) {
-        if (pushTimer) clearTimeout(pushTimer);
-        pendingPush = true;
-        syncNow(true);
-      } else {
-        scheduleCloudPush();
-      }
+    if (triggerSync && window.GoogleSync && typeof window.GoogleSync.onLocalSave === 'function') {
+      window.GoogleSync.onLocalSave(immediate);
     }
   }
 
   function getData() { return data; }
 
-  function replaceData(newData, triggerSync = true) {
+  function replaceData(newData, triggerSync = true, immediate = false) {
     const def = createDefaultState();
     data = {
       ...def,
@@ -396,7 +384,8 @@ window.AppState = (function () {
       resolvedPenalties: newData.resolvedPenalties || {}
     };
     markLedgerDirty();
-    save(triggerSync);
+    applySyncedPreferences();
+    save(triggerSync, immediate);
   }
 
   function resetAll() {
@@ -408,7 +397,7 @@ window.AppState = (function () {
     data = createDefaultState();
     markDeleted(allIds);
     markLedgerDirty();
-    save(true);
+    save(true, true);
   }
 
   function loadDemoData() {
@@ -490,7 +479,7 @@ window.AppState = (function () {
       }
     };
 
-    replaceData(demo, true);
+    replaceData(demo, true, true);
   }
 
   function initThemeAndTelegram() {
@@ -520,6 +509,8 @@ window.AppState = (function () {
   function applyTheme(dark, persist = true, syncToCloud = false) {
     isDark = !!dark;
     document.documentElement.classList.toggle('dark', isDark);
+    const tc = document.getElementById('meta-theme-color');
+    if (tc) tc.setAttribute('content', isDark ? '#090C12' : '#F4F0E8');
     if (persist) {
       try {
         localStorage.setItem(C.THEME_KEY, isDark ? 'dark' : 'light');
@@ -556,6 +547,8 @@ window.AppState = (function () {
     save,
     getData,
     replaceData,
+    mergeData,
+    applySyncedPreferences,
     resetAll,
     loadDemoData,
     markLedgerDirty,
@@ -567,7 +560,8 @@ window.AppState = (function () {
     setSyncConfig,
     clearSyncConfig,
     getSyncStatus,
-            syncNow,
+    setSyncStatus,
+    syncNow,
     initThemeAndTelegram,
     applyTheme,
     toggleTheme,

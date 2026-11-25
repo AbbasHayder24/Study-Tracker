@@ -49,9 +49,7 @@ window.SettingsModule = (function () {
     const notifGranted = settings.notificationsEnabled && typeof window.Notification !== 'undefined' && Notification.permission === 'granted';
     const pushWorkerUrl = window.PushManagerClient ? window.PushManagerClient.getWorkerUrl() : (settings.pushWorkerUrl || '');
     const pushActive = !!settings.pushEnabled && !!pushWorkerUrl && typeof window.Notification !== 'undefined' && Notification.permission === 'granted';
-    const syncCfg = window.AppState.getSyncConfig();
     const syncStatus = window.AppState.getSyncStatus();
-    const isConnected = !!syncCfg.token;
     const lastTime = formatLastSync(syncStatus.lastSyncedAt);
     const curLang = window.I18n ? window.I18n.getLang() : 'en';
 
@@ -81,8 +79,12 @@ window.SettingsModule = (function () {
           ${(() => {
             const gUser = window.GoogleSync && window.GoogleSync.getUser();
             if (gUser) {
+              const syncMeta = syncStatus.state === 'error' && syncStatus.lastError
+                ? `<div class="text-[11px] text-rose-500 truncate">⚠️ ${window.AppUI.escapeHtml(syncStatus.lastError)}</div>`
+                : (lastTime ? `<div class="text-[11px] text-slate-400">${isAr() ? 'آخر مزامنة:' : 'Last sync:'} ${window.AppUI.escapeHtml(lastTime)}</div>` : '');
               return `
                 <div class="text-xs text-slate-600 dark:text-slate-300 truncate">${window.AppUI.escapeHtml(gUser.displayName || gUser.email)} ${gUser.displayName && gUser.email ? `(${window.AppUI.escapeHtml(gUser.email)})` : ''}</div>
+                ${syncMeta}
                 <div class="grid grid-cols-2 gap-2">
                   <button id="setting-google-sync-now" type="button" class="py-2 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">${isAr() ? '🔄 مزامنة الآن' : '🔄 Sync Now'}</button>
                   <button id="setting-google-signout" type="button" class="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">${isAr() ? 'تسجيل الخروج' : 'Sign Out'}</button>

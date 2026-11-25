@@ -1,6 +1,6 @@
 /**
  * app.js — Main entry point: instant boot, bilingual EN/AR toggle, header sync indicator,
- * auto-sync on resume/online + 10s Focus polling, 6-tab navigation
+ * auto-sync on resume/online + 60s Focus polling, 6-tab navigation
  */
 window.StudyApp = (function () {
   const TABS = [
@@ -22,7 +22,6 @@ window.StudyApp = (function () {
   function renderHeader() {
     const today = window.LedgerEngine.getTodaySummary();
     const isDark = window.AppState.getIsDark();
-    const syncCfg = window.AppState.getSyncConfig();
     const syncStatus = window.AppState.getSyncStatus();
     const hasSync = !!(window.GoogleSync && window.GoogleSync.getUser());
     const isAr = window.I18n && window.I18n.isRTL();
@@ -33,7 +32,7 @@ window.StudyApp = (function () {
 
     const syncIcon = syncStatus.state === 'syncing' ? '🔄' : (syncStatus.state === 'error' ? '⚠️' : '☁️');
     const syncBtnHtml = hasSync
-      ? `<button id="header-sync-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(t('syncNowTitle'))}">${syncIcon}</button>`
+      ? `<button id="header-sync-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(syncStatus.lastError || t('syncNowTitle'))}">${syncIcon}</button>`
       : '';
 
     const headerSig = `${today.logged}|${today.target}|${isDark}|${hasSync}|${syncStatus.state}|${isAr}`;
@@ -185,7 +184,6 @@ window.StudyApp = (function () {
   }
 
   function renderAll(animate = false) {
-    const active = window.AppState.getActiveTab();
     markAllTabsDirty();
     renderHeader();
     renderMain(animate, true);
@@ -201,8 +199,12 @@ window.StudyApp = (function () {
 
   async function runBackgroundSync() {
     try {
-      if (!window.GoogleSync || !window.GoogleSync.getUser()) return;
-      const res = await window.GoogleSync.syncNow(true);
+      if (!window.GoogleSync) return;
+      const res = window.GoogleSync.getUser()
+        ? await window.GoogleSync.syncNow(true)
+        : (typeof window.GoogleSync.ensureReadyAndSync === 'function'
+            ? await window.GoogleSync.ensureReadyAndSync(true)
+            : null);
       if (res && res.ok && res.updated) {
         if (!isUserEditingOrModalOpen()) {
           renderAll();
@@ -216,8 +218,6 @@ window.StudyApp = (function () {
 
   function loadOptionalEnhancementsInBackground() {
     setTimeout(() => {
-      runBackgroundSync();
-
       try {
         const isTelegramEnv = /Telegram/i.test(navigator.userAgent || '') ||
           (window.location && /tgWebApp/i.test(window.location.hash + window.location.search));
