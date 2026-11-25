@@ -263,6 +263,114 @@ window.PushManagerClient = (function () {
     }
   }
 
+  async function enableUnifiedNotifications() {
+    const t = (k, v) => (window.I18n ? window.I18n.t(k, v) : k);
+    const ar = !!(window.I18n && window.I18n.isRTL());
+
+    if (typeof window.Notification === 'undefined') {
+      return { ok: false, mode: 'none', error: t('notifNotSupported') };
+    }
+
+    // Request permission immediately inside user gesture
+    let perm = Notification.permission;
+    if (perm !== 'granted') {
+      try {
+        perm = await Notification.requestPermission();
+      } catch (e) {
+        return { ok: false, mode: 'none', error: t('notifError') };
+      }
+    }
+    if (perm !== 'granted') {
+      return { ok: false, mode: 'none', error: t('notifDenied') };
+    }
+
+    const data = window.AppState.getData();
+    if (!data.settings) data.settings = {};
+    data.settings.notificationsEnabled = true;
+
+    // Try enabling Cloudflare background Web Push as part of the same 1-tap toggle
+    if (isIOS() && !isStandalonePWA()) {
+      data.settings.pushEnabled = false;
+      window.AppState.save();
+      return {
+        ok: true,
+        mode: 'local',
+        note: ar
+          ? 'تم تفعيل إشعارات التطبيق — لإشعارات الخلفية على iOS أضف التطبيق للشاشة الرئيسية'
+          : 'App notifications enabled — add to Home Screen on iOS for background push'
+      };
+    }
+
+    const pushRes = await subscribe(getWorkerUrl());
+    if (pushRes && pushRes.ok) {
+      return {
+        ok: true,
+        mode: 'unified',
+        note: ar
+          ? 'تم تفعيل إشعارات التطبيق والخلفية (Cloudflare) بنجاح 🔔'
+          : 'App & background (Cloudflare) notifications enabled 🔔'
+      };
+    }
+
+    // Graceful fallback: keep local notifications active if worker is offline/unreachable
+    data.settings.pushEnabled = false;
+    window.AppState.save();
+    return {
+      ok: true,
+      mode: 'local',
+      note: ar
+        ? 'تم تفعيل إشعارات التطبيق (تعذر ربط إشعارات الخلفية حالياً)'
+        : 'App notifications enabled (background push unavailable right now)'
+    };
+  }
+
+  async function disableUnifiedNotifications() {
+    await unsubscribe();
+    try {
+      const data = window.AppState.getData();
+      if (data && data.settings) {
+        data.settings.notificationsEnabled = false;
+        data.settings.pushEnabled = false;
+        window.AppState.save();
+      }
+    } catch (e) {}
+    return { ok: true };
+  }
+
+  async function sendUnifiedTestNotification() {
+    const t = (k, v) => (window.I18n ? window.I18n.t(k, v) : k);
+    const ar = !!(window.I18n && window.I18n.isRTL());
+    const data = window.AppState && window.AppState.getData();
+    const pushOn = !!(data && data.settings && data.settings.pushEnabled);
+
+    if (pushOn && navigator.onLine !== false) {
+      const res = await sendTestPush(5);
+      if (res && res.ok) {
+        return {
+          ok: true,
+          mode: 'push',
+          message: ar
+            ? 'سيصلك إشعار اختبار عبر Cloudflare خلال 5 ثوانٍ (يمكنك إغلاق التطبيق للتجربة) 🔔'
+            : 'Cloudflare test push scheduled in 5s (you can close the app to test) 🔔'
+        };
+      }
+    }
+
+    if (typeof window.Notification !== 'undefined' && Notification.permission === 'granted') {
+      await showLocalNotification(t('pushTestTitle'), t('pushTestBody'));
+      return {
+        ok: true,
+        mode: 'local',
+        message: ar ? 'تم إرسال إشعار اختبار محلي 🔔' : 'Local test notification sent 🔔'
+      };
+    }
+
+    return {
+      ok: false,
+      error: ar ? 'فعّل الإشعارات أولاً لتجربتها' : 'Enable notifications first to test'
+    };
+  }
+
   async function showLocalNotification(title, body) {
     try {
       const reg = await registerServiceWorker();
@@ -299,6 +407,9 @@ window.PushManagerClient = (function () {
     scheduleTimerPush,
     cancelTimerPush,
     sendTestPush,
-    showLocalNotification
+    showLocalNotification,
+    enableUnifiedNotifications,
+    disableUnifiedNotifications,
+    sendUnifiedTestNotification
   };
 })();

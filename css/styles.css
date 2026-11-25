@@ -628,3 +628,15 @@ form.flex > button {
   max-height: calc(100vh - 32px);
   overflow-y: auto;
 }
+
+/* Prevent accidental text selection & copying on tabs and app UI (keep inputs editable) */
+html, body, header, nav, button, label, h1, h2, h3, h4, svg {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, select, [contenteditable="true"], .allow-select {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}

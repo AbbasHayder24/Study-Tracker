@@ -1,8 +1,9 @@
 /**
- * app.js — Main entry point: instant boot, bilingual EN/AR toggle, header sync indicator,
- * auto-sync on resume/online + 60s Focus polling, 6-tab navigation
+ * app.js — Main entry point: lazy-loaded tab modules, scoped tab re-rendering,
+ * bilingual EN/AR toggle, header sync indicator, auto-sync on resume/online, 6-tab navigation
  */
 window.StudyApp = (function () {
+  const ASSET_VER = '54';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'tasks', key: 'tab_tasks', icon: '✅' },
@@ -12,11 +13,60 @@ window.StudyApp = (function () {
     { id: 'settings', key: 'tab_settings', icon: '⚙️' }
   ];
 
+  // Each tab loads only the scripts it needs on first visit
+  const TAB_SCRIPTS = {
+    focus: ['js/tasks.js', 'js/bookshelf.js', 'js/groups.js', 'js/focus.js'],
+    tasks: ['js/tasks.js'],
+    habits: ['js/habits.js'],
+    stats: ['js/habits.js', 'js/stats.js'],
+    challenge: ['js/reviews.js', 'js/challenge.js'],
+    settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js']
+  };
+
+  const scriptPromises = {};
   let lastHeaderSig = "";
   let lastNavLang = "";
+  let renderSeq = 0;
 
   function t(key, vars) {
     return window.I18n ? window.I18n.t(key, vars) : key;
+  }
+
+  function loadScriptOnce(path) {
+    if (scriptPromises[path]) return scriptPromises[path];
+    const url = `${path}?v=${ASSET_VER}`;
+    scriptPromises[path] = new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src^="${path}"]`);
+      if (existing && existing.getAttribute('data-loaded') === '1') {
+        resolve();
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = url;
+      s.async = false;
+      s.onload = () => {
+        s.setAttribute('data-loaded', '1');
+        resolve();
+      };
+      s.onerror = () => {
+        delete scriptPromises[path];
+        s.remove();
+        reject(new Error('Failed to load ' + path));
+      };
+      document.head.appendChild(s);
+    });
+    return scriptPromises[path];
+  }
+
+  async function ensureTabLoaded(tabId) {
+    const list = TAB_SCRIPTS[tabId] || [];
+    for (const path of list) {
+      await loadScriptOnce(path);
+    }
+    if (tabId === 'focus' && window.FocusModule && !window.FocusModule.__prefsBooted) {
+      window.FocusModule.__prefsBooted = true;
+      if (window.FocusModule.syncFromSettings) window.FocusModule.syncFromSettings();
+    }
   }
 
   function renderHeader() {
@@ -121,6 +171,7 @@ window.StudyApp = (function () {
   const tabDirty = { focus: true, tasks: true, habits: true, stats: true, challenge: true, settings: true };
   const tabScrollY = {};
   let currentMountedTab = null;
+  let lastDataUpdatedAt = 0;
 
   function markAllTabsDirty(exceptTab = null) {
     TABS.forEach(tb => {
@@ -133,6 +184,30 @@ window.StudyApp = (function () {
     mainEl.innerHTML = TABS.map(tb => `<div id="tab-panel-${tb.id}" data-tab-panel="${tb.id}" class="hidden"></div>`).join('');
   }
 
+  function isModuleReady(tabId) {
+    if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule && window.TasksModule && window.GroupsModule);
+    if (tabId === 'tasks') return !!window.TasksModule;
+    if (tabId === 'habits') return !!window.HabitsModule;
+    if (tabId === 'stats') return !!(window.StatsModule && window.HabitsModule);
+    if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
+    if (tabId === 'settings') return !!(window.SettingsModule && window.ChallengeModule);
+    return true;
+  }
+
+  // Scoped re-render: only rebuilds the active tab, and only marks other tabs dirty if state actually changed
+  function renderActiveTabScoped(animate = false) {
+    const active = window.AppState.getActiveTab();
+    const nowTs = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
+    const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
+    if (nowTs !== lastDataUpdatedAt || curLang !== lastNavLang) {
+      markAllTabsDirty(active);
+      lastDataUpdatedAt = nowTs;
+    }
+    renderHeader();
+    renderMain(animate, true);
+    if (curLang !== lastNavLang) renderNav();
+  }
+
   function renderMain(animate = false, forceCurrent = false) {
     const active = window.AppState.getActiveTab();
     const mainEl = document.getElementById('app-main');
@@ -141,7 +216,7 @@ window.StudyApp = (function () {
 
     if (currentMountedTab && currentMountedTab !== active) {
       tabScrollY[currentMountedTab] = window.scrollY || 0;
-      if (currentMountedTab === 'challenge' && window.GroupsModule) {
+      if (currentMountedTab === 'focus' && window.GroupsModule) {
         window.GroupsModule.detach();
       }
     }
@@ -158,6 +233,23 @@ window.StudyApp = (function () {
 
     const needsBuild = forceCurrent || tabDirty[active] || !activePanel.children.length;
     if (needsBuild) {
+      if (!isModuleReady(active)) {
+        const mySeq = ++renderSeq;
+        if (!activePanel.children.length) {
+          activePanel.innerHTML = `<div class="py-12 text-center text-xs text-slate-400">...</div>`;
+        }
+        ensureTabLoaded(active).then(() => {
+          if (mySeq !== renderSeq || window.AppState.getActiveTab() !== active) return;
+          renderMain(animate, true);
+        }).catch(() => {
+          if (mySeq !== renderSeq) return;
+          activePanel.innerHTML = `<div class="py-10 text-center text-xs text-rose-500">${window.I18n && window.I18n.isRTL() ? 'تعذر تحميل التبويب — تحقق من الاتصال' : 'Failed to load tab — check connection'}</div>`;
+        });
+        currentMountedTab = active;
+        return;
+      }
+
+      lastDataUpdatedAt = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
       let html = '';
       if (active === 'focus') html = window.FocusModule.render();
       else if (active === 'tasks') html = window.TasksModule.render();
@@ -169,12 +261,13 @@ window.StudyApp = (function () {
       activePanel.innerHTML = html;
       tabDirty[active] = false;
 
-      if (active === 'focus') window.FocusModule.bindEvents(renderAll);
-      else if (active === 'tasks') window.TasksModule.bindEvents(renderAll);
-      else if (active === 'habits') window.HabitsModule.bindEvents(renderAll);
-      else if (active === 'stats') window.StatsModule.bindEvents(renderAll);
-      else if (active === 'challenge') window.ChallengeModule.bindEvents(renderAll);
-      else if (active === 'settings') window.SettingsModule.bindEvents(renderAll);
+      const scopedCb = () => renderActiveTabScoped(false);
+      if (active === 'focus') window.FocusModule.bindEvents(scopedCb);
+      else if (active === 'tasks') window.TasksModule.bindEvents(scopedCb);
+      else if (active === 'habits') window.HabitsModule.bindEvents(scopedCb);
+      else if (active === 'stats') window.StatsModule.bindEvents(scopedCb);
+      else if (active === 'challenge') window.ChallengeModule.bindEvents(scopedCb);
+      else if (active === 'settings') window.SettingsModule.bindEvents(scopedCb);
     }
 
     if (animate && currentMountedTab !== active) {
@@ -187,6 +280,7 @@ window.StudyApp = (function () {
   }
 
   function renderAll(animate = false) {
+    lastDataUpdatedAt = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
     markAllTabsDirty();
     renderHeader();
     renderMain(animate, true);
@@ -219,6 +313,19 @@ window.StudyApp = (function () {
     } catch (e) {}
   }
 
+  function checkDeepJoinLinkEarly() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = (params.get('join') || '').trim().toUpperCase();
+      if (!joinCode) return;
+      sessionStorage.setItem('study_tracker_pending_join_code', joinCode);
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+      window.AppState.setActiveTab('focus');
+      localStorage.setItem('study_tracker_focus_bottom_view', 'group');
+    } catch (e) {}
+  }
+
   function loadOptionalEnhancementsInBackground() {
     setTimeout(() => {
       try {
@@ -241,9 +348,7 @@ window.StudyApp = (function () {
   function init() {
     window.AppState.initThemeAndTelegram();
     window.AppState.load();
-    if (window.GroupsModule && window.GroupsModule.checkJoinLink) {
-      window.GroupsModule.checkJoinLink();
-    }
+    checkDeepJoinLinkEarly();
     if (window.PushManagerClient) window.PushManagerClient.registerServiceWorker();
 
     const modalBackdrop = document.getElementById('app-modal-backdrop');
@@ -256,10 +361,10 @@ window.StudyApp = (function () {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         runBackgroundSync();
-        if (window.AppState.getActiveTab() === 'challenge' && window.GroupsModule) {
+        if (window.AppState.getActiveTab() === 'focus' && window.GroupsModule) {
           try {
-            if (localStorage.getItem('study_tracker_challenge_subview') === 'group') {
-              window.GroupsModule.attachLiveListener(renderAll);
+            if (localStorage.getItem('study_tracker_focus_bottom_view') === 'group') {
+              window.GroupsModule.attachLiveListener(() => renderActiveTabScoped(false));
             }
           } catch (e) {}
         }

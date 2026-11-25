@@ -22,6 +22,11 @@ window.FocusModule = (function () {
   let intervalId = null;
   let lastRerender = null;
   let restoredOnce = false;
+  let bottomView = 'shelf'; // 'shelf' | 'group'
+  try {
+    const savedBv = localStorage.getItem('study_tracker_focus_bottom_view');
+    if (savedBv === 'shelf' || savedBv === 'group') bottomView = savedBv;
+  } catch (e) {}
 
   const MAX_FOCUS_MINUTES = 360; // 6 hours max
   const DIAL_RADIUS = 84;
@@ -318,6 +323,7 @@ window.FocusModule = (function () {
 
   function finishSession(completed, rerender, naturalFinish = false) {
     const liveElapsed = getLiveElapsedSec();
+    const pushAlreadyFired = !!(mode === 'pomodoro' && naturalFinish && totalSec > 0 && (liveElapsed - totalSec) > 8 && window.AppState && window.AppState.getData().settings && window.AppState.getData().settings.pushEnabled);
     const finalElapsed = (mode === 'pomodoro' && naturalFinish)
       ? totalSec
       : (mode === 'pomodoro' && totalSec > 0 ? Math.min(totalSec, liveElapsed) : liveElapsed);
@@ -379,17 +385,21 @@ window.FocusModule = (function () {
     if (completed && tag && tag.countsForChallenge) {
       window.LedgerEngine.addStudyMinutesToDate(todayISO, actualMinutes, true);
       window.AppState.save(true, true);
-      window.AppUI.sendSessionNotification(
-        t('notifCompleteTitle'),
-        t('notifCompleteChallenge', { m: roundedM })
-      );
+      if (!pushAlreadyFired) {
+        window.AppUI.sendSessionNotification(
+          t('notifCompleteTitle'),
+          t('notifCompleteChallenge', { m: roundedM })
+        );
+      }
       window.AppUI.showToast(t('toastCompleteChallenge', { m: roundedM }), 'success');
     } else if (completed) {
       window.AppState.save(true, true);
-      window.AppUI.sendSessionNotification(
-        t('notifCompleteShelfTitle'),
-        t('notifCompleteShelf', { m: roundedM })
-      );
+      if (!pushAlreadyFired) {
+        window.AppUI.sendSessionNotification(
+          t('notifCompleteShelfTitle'),
+          t('notifCompleteShelf', { m: roundedM })
+        );
+      }
       window.AppUI.showToast(t('toastCompleteShelf'), 'success');
     } else {
       window.AppState.save(true, true);
@@ -585,7 +595,16 @@ window.FocusModule = (function () {
           </div>
         </div>
 
-        ${window.BookshelfModule.renderSection()}
+        <div class="flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 gap-1">
+          <button type="button" data-focus-bview="shelf" class="flex-1 py-2 px-2 rounded-lg text-xs font-bold transition ${bottomView === 'shelf' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
+            📚 ${isAr() ? 'رف الكتب' : 'Bookshelf'}
+          </button>
+          <button type="button" data-focus-bview="group" class="flex-1 py-2 px-2 rounded-lg text-xs font-bold transition ${bottomView === 'group' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
+            👥 ${isAr() ? 'دراسة معاً' : 'Study Together'}${(() => { const n = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0; return n > 0 ? ` <span class="text-[10px]">🟢${n}</span>` : ''; })()}
+          </button>
+        </div>
+
+        ${bottomView === 'group' && window.GroupsModule ? window.GroupsModule.render() : window.BookshelfModule.renderSection()}
       </div>
     `;
   }
@@ -843,7 +862,25 @@ window.FocusModule = (function () {
     const stopBtn = document.getElementById('focus-stop-btn');
     if (stopBtn) stopBtn.onclick = () => stopOrFinish(rerender);
 
-    window.BookshelfModule.bindEvents(rerender);
+    document.querySelectorAll('[data-focus-bview]').forEach(btn => {
+      btn.onclick = () => {
+        const nextView = btn.getAttribute('data-focus-bview');
+        if (!nextView || nextView === bottomView) return;
+        if (bottomView === 'group' && nextView !== 'group' && window.GroupsModule) {
+          window.GroupsModule.detach();
+        }
+        bottomView = nextView;
+        try { localStorage.setItem('study_tracker_focus_bottom_view', bottomView); } catch (e) {}
+        if (rerender) rerender();
+      };
+    });
+
+    if (bottomView === 'group' && window.GroupsModule) {
+      window.GroupsModule.bindEvents(rerender);
+    } else {
+      if (window.GroupsModule) window.GroupsModule.detach();
+      window.BookshelfModule.bindEvents(rerender);
+    }
   }
 
   return {

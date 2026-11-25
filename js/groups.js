@@ -556,9 +556,9 @@ window.GroupsModule = (function () {
       // Clean query param so refresh doesn't re-trigger
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
-      // Navigate directly to Challenge -> Group
-      if (window.AppState) window.AppState.setActiveTab('challenge');
-      try { localStorage.setItem('study_tracker_challenge_subview', 'group'); } catch (e) {}
+      // Navigate directly to Focus -> Study Together
+      if (window.AppState) window.AppState.setActiveTab('focus');
+      try { localStorage.setItem('study_tracker_focus_bottom_view', 'group'); } catch (e) {}
     } catch (e) {}
   }
 
@@ -1136,7 +1136,7 @@ window.GroupsModule = (function () {
 
   function onAuthReady() {
     syncMyPresence(false);
-    if (lastRerenderFn && window.AppState && window.AppState.getActiveTab() === 'challenge') {
+    if (lastRerenderFn && window.AppState && window.AppState.getActiveTab() === 'focus') {
       consumePendingJoinCode(lastRerenderFn);
     }
   }

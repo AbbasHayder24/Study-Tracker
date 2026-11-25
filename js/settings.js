@@ -46,9 +46,10 @@ window.SettingsModule = (function () {
   function render() {
     const data = window.AppState.getData();
     const settings = data.settings || { soundEnabled: true, notificationsEnabled: false };
-    const notifGranted = settings.notificationsEnabled && typeof window.Notification !== 'undefined' && Notification.permission === 'granted';
+    const notifGranted = !!settings.notificationsEnabled && typeof window.Notification !== 'undefined' && Notification.permission === 'granted';
     const pushWorkerUrl = window.PushManagerClient ? window.PushManagerClient.getWorkerUrl() : (settings.pushWorkerUrl || '');
-    const pushActive = !!settings.pushEnabled && !!pushWorkerUrl && typeof window.Notification !== 'undefined' && Notification.permission === 'granted';
+    const pushActive = !!settings.pushEnabled && !!pushWorkerUrl && notifGranted;
+    const notifAnyActive = notifGranted || pushActive;
     const syncStatus = window.AppState.getSyncStatus();
     const lastTime = formatLastSync(syncStatus.lastSyncedAt);
     const curLang = window.I18n ? window.I18n.getLang() : 'en';
@@ -81,17 +82,19 @@ window.SettingsModule = (function () {
               ${t('testChime')}
             </button>
           </div>
-          <button id="setting-enable-notif" type="button" class="w-full py-2.5 px-3 rounded-xl text-xs font-bold ${notifGranted ? 'bg-emerald-600 text-white' : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'}">
-            ${notifGranted ? t('notifActive') : t('enableNotif')}
-          </button>
           <div class="pt-2 border-t border-slate-100 dark:border-slate-700 space-y-2">
-            <div class="text-[11px] font-bold text-slate-600 dark:text-slate-300">${t('pushSectionLabel')}</div>
+            <div class="flex items-center justify-between text-[11px]">
+              <span class="font-bold text-slate-600 dark:text-slate-300">${isAr() ? '🔔 الإشعارات (التطبيق + الخلفية)' : '🔔 Notifications (App + Background)'}</span>
+              <span class="font-bold ${pushActive ? 'text-emerald-600 dark:text-emerald-400' : (notifAnyActive ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400')}">
+                ${pushActive ? (isAr() ? '● مفعّلة بالكامل' : '● Full Active') : (notifAnyActive ? (isAr() ? '● محلية فقط' : '● Local Only') : (isAr() ? 'متوقفة' : 'Off'))}
+              </span>
+            </div>
             <div class="grid grid-cols-2 gap-2">
-              <button id="setting-toggle-push" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold ${pushActive ? 'bg-emerald-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}">
-                ${pushActive ? t('pushActiveBtn') : t('pushEnableBtn')}
+              <button id="setting-toggle-unified-notif" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold ${notifAnyActive ? 'bg-emerald-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}">
+                ${notifAnyActive ? (isAr() ? '🔔 الإشعارات مفعّلة' : '🔔 Notifications On') : (isAr() ? 'تفعيل الإشعارات' : 'Enable Notifications')}
               </button>
-              <button id="setting-test-push" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
-                ${t('pushTestBtn')}
+              <button id="setting-test-unified-notif" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold">
+                ${isAr() ? 'اختبار الإشعار' : 'Test Notification'}
               </button>
             </div>
           </div>
@@ -315,42 +318,35 @@ window.SettingsModule = (function () {
       };
     }
 
-    const enableNotifBtn = document.getElementById('setting-enable-notif');
-    if (enableNotifBtn) {
-      enableNotifBtn.onclick = async () => {
-        await window.AppUI.requestNotificationPermission();
-        rerender();
-      };
-    }
-
-    const togglePushBtn = document.getElementById('setting-toggle-push');
-    if (togglePushBtn && window.PushManagerClient) {
-      togglePushBtn.onclick = async () => {
+    const unifiedNotifBtn = document.getElementById('setting-toggle-unified-notif');
+    if (unifiedNotifBtn && window.PushManagerClient) {
+      unifiedNotifBtn.onclick = async () => {
         const data = window.AppState.getData();
-        if (data.settings && data.settings.pushEnabled) {
-          await window.PushManagerClient.unsubscribe();
-          window.AppUI.showToast(t('pushDisabledToast'), 'info');
+        const isCurrentlyOn = !!(data.settings && (data.settings.notificationsEnabled || data.settings.pushEnabled) && typeof window.Notification !== 'undefined' && Notification.permission === 'granted');
+        if (isCurrentlyOn) {
+          await window.PushManagerClient.disableUnifiedNotifications();
+          window.AppUI.showToast(isAr() ? 'تم إيقاف الإشعارات' : 'Notifications disabled', 'info');
           rerender();
           return;
         }
-        const res = await window.PushManagerClient.subscribe();
-        if (res.ok) {
-          window.AppUI.showToast(t('pushEnabledToast'), 'success');
+        const res = await window.PushManagerClient.enableUnifiedNotifications();
+        if (res && res.ok) {
+          window.AppUI.showToast(res.note || t('notifEnabled'), res.mode === 'unified' ? 'success' : 'info');
         } else {
-          window.AppUI.showToast(res.error || t('notifError'), 'warning');
+          window.AppUI.showToast((res && res.error) || t('notifError'), 'warning');
         }
         rerender();
       };
     }
 
-    const testPushBtn = document.getElementById('setting-test-push');
-    if (testPushBtn && window.PushManagerClient) {
-      testPushBtn.onclick = async () => {
-        const res = await window.PushManagerClient.sendTestPush(5);
-        if (res.ok) {
-          window.AppUI.showToast(t('pushTestScheduled'), 'success');
+    const testUnifiedBtn = document.getElementById('setting-test-unified-notif');
+    if (testUnifiedBtn && window.PushManagerClient) {
+      testUnifiedBtn.onclick = async () => {
+        const res = await window.PushManagerClient.sendUnifiedTestNotification();
+        if (res && res.ok) {
+          window.AppUI.showToast(res.message || t('pushTestScheduled'), 'success');
         } else {
-          window.AppUI.showToast(res.error || t('notifError'), 'warning');
+          window.AppUI.showToast((res && res.error) || t('notifError'), 'warning');
         }
       };
     }
