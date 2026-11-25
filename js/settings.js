@@ -131,6 +131,33 @@ window.SettingsModule = (function () {
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${isAr() ? '☁️ المزامنة بحساب Google' : '☁️ Google Account Sync'}</h3>
+            ${window.GoogleSync && window.GoogleSync.getUser()
+              ? `<span class="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">● ${isAr() ? 'متصل' : 'Connected'}</span>`
+              : `<span class="text-[11px] text-slate-400">${isAr() ? 'غير متصل' : 'Not signed in'}</span>`
+            }
+          </div>
+          ${(() => {
+            const gUser = window.GoogleSync && window.GoogleSync.getUser();
+            if (gUser) {
+              return `
+                <div class="text-xs text-slate-600 dark:text-slate-300 truncate">${window.AppUI.escapeHtml(gUser.displayName || gUser.email)} ${gUser.displayName && gUser.email ? `(${window.AppUI.escapeHtml(gUser.email)})` : ''}</div>
+                <div class="grid grid-cols-2 gap-2">
+                  <button id="setting-google-sync-now" type="button" class="py-2 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">${isAr() ? '🔄 مزامنة الآن' : '🔄 Sync Now'}</button>
+                  <button id="setting-google-signout" type="button" class="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">${isAr() ? 'تسجيل الخروج' : 'Sign Out'}</button>
+                </div>
+              `;
+            }
+            return `
+              <button id="setting-google-signin" type="button" class="w-full py-2.5 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">
+                ${isAr() ? 'تسجيل الدخول والمزامنة بحساب Google' : 'Sign in & Sync with Google'}
+              </button>
+            `;
+          })()}
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           <div>
             <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">${t('startDateTitle')}</h3>
             <div class="flex gap-2">
@@ -252,6 +279,28 @@ window.SettingsModule = (function () {
   }
 
   function bindEvents(rerender) {
+    const gSignInBtn = document.getElementById('setting-google-signin');
+    if (gSignInBtn && window.GoogleSync) {
+      gSignInBtn.onclick = async () => {
+        const res = await window.GoogleSync.signIn();
+        if (res && res.ok && !res.redirecting) rerender();
+      };
+    }
+    const gSyncNowBtn = document.getElementById('setting-google-sync-now');
+    if (gSyncNowBtn && window.GoogleSync) {
+      gSyncNowBtn.onclick = async () => {
+        const res = await window.GoogleSync.syncNow(false);
+        if (res && res.updated) rerender();
+      };
+    }
+    const gSignOutBtn = document.getElementById('setting-google-signout');
+    if (gSignOutBtn && window.GoogleSync) {
+      gSignOutBtn.onclick = async () => {
+        await window.GoogleSync.signOut();
+        rerender();
+      };
+    }
+
     const langEnBtn = document.getElementById('setting-lang-en');
     const langArBtn = document.getElementById('setting-lang-ar');
     if (langEnBtn) {

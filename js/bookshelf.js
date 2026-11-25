@@ -5,6 +5,33 @@
  * Both styles support two-tone Tag + Subject colors, clean emoji-stripped spine labels, and Select All / Delete.
  */
 window.BookshelfModule = (function () {
+  let shelfPeriod = 'day'; // 'day' | 'week' | 'month' | 'year'
+  let visibleShelvesCount = 3;
+  let cachedShelfKey = '';
+  let cachedShelfHtml = '';
+
+  function filterBooksByPeriod(allBooks, period) {
+    const todayISO = window.AppState.getLocalTodayISO();
+    if (period === 'day') {
+      return allBooks.filter(b => b.date === todayISO);
+    }
+    if (period === 'week') {
+      const parts = todayISO.split('-').map(Number);
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      d.setDate(d.getDate() - 6);
+      const startISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return allBooks.filter(b => b.date && b.date >= startISO && b.date <= todayISO);
+    }
+    if (period === 'month') {
+      const ym = todayISO.slice(0, 7);
+      return allBooks.filter(b => b.date && String(b.date).startsWith(ym));
+    }
+    if (period === 'year') {
+      const yr = todayISO.slice(0, 4);
+      return allBooks.filter(b => b.date && String(b.date).startsWith(yr));
+    }
+    return allBooks;
+  }
   const C = window.APP_CONFIG;
   let multiSelectMode = false;
   let selectedIds = new Set();
@@ -264,8 +291,18 @@ window.BookshelfModule = (function () {
 
   function renderSection() {
     const data = window.AppState.getData();
-    const books = [...data.books].sort((a, b) => (String(b.date || '') + String(b.createdAt || '')).localeCompare(String(a.date || '') + String(a.createdAt || '')));
     const style = getShelfStyle();
+    const langKey = (window.I18n && window.I18n.isRTL()) ? 'ar' : 'en';
+    const darkKey = window.AppState.getIsDark() ? 'd' : 'l';
+    const selKey = multiSelectMode ? ('m:' + [...selectedIds].sort().join(',')) : 'n';
+    const todayISO = window.AppState.getLocalTodayISO();
+    const booksSig = `${data.books.length}|${data.updatedAt || 0}|${style}|${langKey}|${darkKey}|${selKey}|${visibleShelvesCount}|${shelfPeriod}|${todayISO}`;
+    if (booksSig === cachedShelfKey && cachedShelfHtml) {
+      return cachedShelfHtml;
+    }
+
+    const filteredBooks = filterBooksByPeriod(data.books || [], shelfPeriod);
+    const books = [...filteredBooks].sort((a, b) => (String(b.date || '') + String(b.createdAt || '')).localeCompare(String(a.date || '') + String(a.createdAt || '')));
 
     const completedCount = books.filter(b => b.completed).length;
     const totalMinutes = books.reduce((s, b) => s + (b.completed ? b.minutes : 0), 0);
@@ -276,8 +313,14 @@ window.BookshelfModule = (function () {
       shelves.push(books.slice(i, i + shelfSize));
     }
 
-    const shelvesHtml = shelves.length
-      ? shelves.map((shelfBooks, sIdx) => `
+    const visibleShelves = shelves.slice(0, visibleShelvesCount);
+    const hiddenShelvesCount = Math.max(0, shelves.length - visibleShelves.length);
+    const isArShelf = !!(window.I18n && window.I18n.isRTL());
+    const loadMoreBtnHtml = hiddenShelvesCount > 0
+      ? `<div class="text-center pt-1"><button id="shelf-load-more" type="button" class="px-4 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold text-slate-600 dark:text-slate-200 hover:opacity-85">${isArShelf ? `عرض المزيد (${hiddenShelvesCount} رفوف إضافية)` : `Show More (${hiddenShelvesCount} more shelves)`}</button></div>`
+      : '';
+    const shelvesHtml = visibleShelves.length
+      ? visibleShelves.map((shelfBooks, sIdx) => `
           <div class="mb-4">
             <div class="relative z-10 flex items-end gap-1.5 px-3 pt-2 overflow-x-auto no-scrollbar min-h-[136px]">
               ${shelfBooks.map(book => {
@@ -308,7 +351,7 @@ window.BookshelfModule = (function () {
         </div>
       `;
 
-    return `
+    const outHtml = `
       <div id="bookshelf-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
@@ -340,12 +383,52 @@ window.BookshelfModule = (function () {
           </div>
         </div>
 
-        <div id="bookshelf-shelves-wrap">${shelvesHtml}</div>
+        <div class="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl mb-3 gap-1">
+          ${[
+            { id: 'day', ar: 'اليوم', en: 'Day' },
+            { id: 'week', ar: 'الأسبوع', en: 'Week' },
+            { id: 'month', ar: 'الشهر', en: 'Month' },
+            { id: 'year', ar: 'السنة', en: 'Year' }
+          ].map(p => `
+            <button type="button" data-shelf-period="${p.id}"
+              class="flex-1 py-1.5 rounded-lg text-[11px] font-bold transition ${shelfPeriod === p.id ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
+              ${isArShelf ? p.ar : p.en}
+            </button>
+          `).join('')}
+        </div>
+
+        <div id="bookshelf-shelves-wrap">${shelvesHtml}${loadMoreBtnHtml}</div>
       </div>
     `;
+    cachedShelfKey = booksSig;
+    cachedShelfHtml = outHtml;
+    return outHtml;
   }
 
   function bindEvents(onChanged) {
+    document.querySelectorAll('[data-shelf-period]').forEach(btn => {
+      btn.onclick = () => {
+        const nextPeriod = btn.getAttribute('data-shelf-period');
+        if (nextPeriod && nextPeriod !== shelfPeriod) {
+          shelfPeriod = nextPeriod;
+          visibleShelvesCount = 3;
+          cachedShelfKey = '';
+          selectedIds.clear();
+          multiSelectMode = false;
+          if (onChanged) onChanged();
+        }
+      };
+    });
+
+    const moreBtn = document.getElementById('shelf-load-more');
+    if (moreBtn) {
+      moreBtn.onclick = () => {
+        visibleShelvesCount += 3;
+        cachedShelfKey = '';
+        if (onChanged) onChanged();
+      };
+    }
+
     const infoBtn = document.getElementById('info-shelf-btn');
     if (infoBtn) {
       infoBtn.onclick = () => {
