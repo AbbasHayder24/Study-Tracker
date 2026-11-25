@@ -1,4 +1,6 @@
-/**
+
+  
+  /**
  * google-sync.js — 1-Tap Google Account Sign-In & Cloud Sync via Firebase (Auth + Firestore)
  *
  * 👇 الصق إعدادات firebaseConfig الخاصة بك من Firebase Console مكان الكائن أدناه فقط:
@@ -6,12 +8,12 @@
  */
 window.GoogleSync = (function() {
   const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDw5UpMl3RUEhr_5QhMbk38vOE-e-wnBaA",
-  authDomain: "study-tracker-c2e52.firebaseapp.com",
-  projectId: "study-tracker-c2e52",
-  storageBucket: "study-tracker-c2e52.firebasestorage.app",
-  messagingSenderId: "535559413934",
-  appId: "1:535559413934:web:25f9adca2cb4661f5c4d3f"
+    apiKey: "AIzaSyDw5UpMl3RUEhr_5QhMbk38vOE-e-wnBaA",
+    authDomain: "study-tracker-c2e52.firebaseapp.com",
+    projectId: "study-tracker-c2e52",
+    storageBucket: "study-tracker-c2e52.firebasestorage.app",
+    messagingSenderId: "535559413934",
+    appId: "1:535559413934:web:25f9adca2cb4661f5c4d3f"
   };
   
   const FB_VER = '10.14.1';
@@ -79,11 +81,15 @@ window.GoogleSync = (function() {
           const prevUid = currentUser ? currentUser.uid : null;
           currentUser = user || null;
           if (currentUser) {
-            try { localStorage.setItem('study_tracker_google_uid', currentUser.uid); } catch (e) {}
+            try {
+              localStorage.setItem('study_tracker_google_uid', currentUser.uid);
+              sessionStorage.removeItem('study_tracker_google_redirect');
+            } catch (e) {}
+            if (prevUid !== currentUser.uid && window.StudyApp && window.StudyApp.renderAll) {
+              window.StudyApp.renderAll();
+            }
             syncNow(true).then((res) => {
               if (res && res.updated && window.StudyApp && window.StudyApp.renderAll) {
-                window.StudyApp.renderAll();
-              } else if (prevUid !== currentUser.uid && window.StudyApp && window.StudyApp.renderAll) {
                 window.StudyApp.renderAll();
               }
             });
@@ -202,13 +208,16 @@ window.GoogleSync = (function() {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
       try {
         if (isStandalone) {
+          try { sessionStorage.setItem('study_tracker_google_redirect', '1'); } catch (e) {}
           await auth.signInWithRedirect(provider);
           return { ok: true, redirecting: true };
         }
-        await auth.signInWithPopup(provider);
+        const cred = await auth.signInWithPopup(provider);
+        if (cred && cred.user) currentUser = cred.user;
         return { ok: true };
       } catch (popErr) {
         if (popErr && (popErr.code === 'auth/popup-blocked' || popErr.code === 'auth/operation-not-supported-in-this-environment')) {
+          try { sessionStorage.setItem('study_tracker_google_redirect', '1'); } catch (e) {}
           await auth.signInWithRedirect(provider);
           return { ok: true, redirecting: true };
         }
@@ -247,7 +256,9 @@ window.GoogleSync = (function() {
   if (typeof window !== 'undefined') {
     setTimeout(() => {
       try {
-        if (isConfigured() && (localStorage.getItem('study_tracker_google_uid') || /firebase/i.test(window.location.href))) {
+        const hadUid = !!localStorage.getItem('study_tracker_google_uid');
+        const fromRedirect = !!sessionStorage.getItem('study_tracker_google_redirect');
+        if (isConfigured() && (hadUid || fromRedirect || navigator.onLine !== false)) {
           ensureInit().catch(() => {});
         }
       } catch (e) {}
