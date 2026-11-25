@@ -17,7 +17,7 @@ window.I18n = (function () {
       tab_tasks: 'Tasks',
       tab_habits: 'Habits',
       tab_stats: 'Stats',
-      tab_challenge: 'Challenge',
+      tab_challenge: 'Plan',
       tab_settings: 'Settings',
 
       // Common
@@ -121,7 +121,7 @@ window.I18n = (function () {
       summaryTab: 'Summary',
       logTab: '182-Day Log',
       reviewsTab: 'Reviews',
-      challengeTitle: '🏆 6-Month Challenge',
+      challengeTitle: '🎯 Study Plan',
       loggedLabel: 'Logged:',
       goalLabel: 'Goal:',
       todayHeader: '📅 Today ({day})',
@@ -279,7 +279,7 @@ window.I18n = (function () {
       tab_tasks: 'المهام',
       tab_habits: 'العادات',
       tab_stats: 'الإحصاءات',
-      tab_challenge: 'التحدي',
+      tab_challenge: 'الخطة',
       tab_settings: 'الإعدادات',
 
       // Common
@@ -383,7 +383,7 @@ window.I18n = (function () {
       summaryTab: 'الملخص',
       logTab: 'سجل 182 يوماً',
       reviewsTab: 'المراجعات',
-      challengeTitle: '🏆 تحدي 6 أشهر',
+      challengeTitle: '🎯 الخطة الدراسية',
       loggedLabel: 'المسجّل:',
       goalLabel: 'الهدف:',
       todayHeader: '📅 اليوم ({day})',

@@ -53,6 +53,7 @@ window.SettingsModule = (function () {
     const syncStatus = window.AppState.getSyncStatus();
     const lastTime = formatLastSync(syncStatus.lastSyncedAt);
     const curLang = window.I18n ? window.I18n.getLang() : 'en';
+    const curPal = window.AppState && window.AppState.getPalette ? window.AppState.getPalette() : 'ivory';
 
     return `
       <div class="space-y-4">
@@ -66,6 +67,23 @@ window.SettingsModule = (function () {
             <button id="setting-lang-ar" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold transition ${curLang === 'ar' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
               🇮🇶 العربية
             </button>
+          </div>
+        </div>
+
+        <!-- Classic Liquid Glass Themes -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
+          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">🎨 ${isAr() ? 'الأجواء الزجاجية الكلاسيكية' : 'Classic Glass Themes'}</h3>
+          <div class="grid grid-cols-3 gap-2">
+            ${[
+              { id: 'ivory', ar: 'العاجي الدافئ', en: 'Ivory', dot: '#C9A24D', bg: '#F4F0E8' },
+              { id: 'oxford', ar: 'أخضر أوكسفورد', en: 'Oxford Green', dot: '#1B5E43', bg: '#EFF4EF' },
+              { id: 'burgundy', ar: 'خمري ملكي', en: 'Burgundy', dot: '#7C2338', bg: '#F8F1F2' }
+            ].map(p => `
+              <button type="button" data-pick-palette="${p.id}" class="py-2.5 px-2 rounded-xl text-[11px] font-bold flex flex-col items-center gap-1.5 border transition ${curPal === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-transparent'}">
+                <span class="w-5 h-5 rounded-full border border-white/70 shadow-sm" style="background:linear-gradient(135deg, ${p.bg} 35%, ${p.dot} 100%)"></span>
+                <span>${isAr() ? p.ar : p.en}</span>
+              </button>
+            `).join('')}
           </div>
         </div>
 
@@ -152,6 +170,15 @@ window.SettingsModule = (function () {
                 const cur = Number(settings.dayStartHour) || 0;
                 const label = h === 0 ? t('midnightDefault') : t('hourAm', { h });
                 return `<option value="${h}" ${cur === h ? 'selected' : ''}>${label}</option>`;
+              }).join('')}
+            </select>
+          </div>
+          <div>
+            <label for="setting-max-pause-min" class="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">⏸️ ${isAr() ? 'الحد الأقصى للإيقاف المؤقت (3–7 دقائق)' : 'Max Pause Limit (3–7 min)'}</label>
+            <select id="setting-max-pause-min" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
+              ${[3, 4, 5, 6, 7].map(m => {
+                const curPause = Math.max(3, Math.min(7, Number(settings.maxPauseMinutes) || 5));
+                return `<option value="${m}" ${curPause === m ? 'selected' : ''}>${isAr() ? `${m} دقائق` : `${m} minutes`}</option>`;
               }).join('')}
             </select>
           </div>
@@ -275,6 +302,16 @@ window.SettingsModule = (function () {
       };
     }
 
+    document.querySelectorAll('[data-pick-palette]').forEach(btn => {
+      btn.onclick = () => {
+        const pal = btn.getAttribute('data-pick-palette');
+        if (window.AppState && window.AppState.applyPalette) {
+          window.AppState.applyPalette(pal, true, true);
+          rerender();
+        }
+      };
+    });
+
     const langEnBtn = document.getElementById('setting-lang-en');
     const langArBtn = document.getElementById('setting-lang-ar');
     if (langEnBtn) {
@@ -369,6 +406,18 @@ window.SettingsModule = (function () {
     if (infoDayStartBtn) {
       infoDayStartBtn.onclick = () => {
         window.AppUI.showInfo(t('newDayStartsAt'), t('dayStartInfoBody'));
+      };
+    }
+
+    const maxPauseSel = document.getElementById('setting-max-pause-min');
+    if (maxPauseSel) {
+      maxPauseSel.onchange = (e) => {
+        const val = Math.max(3, Math.min(7, Number(e.target.value) || 5));
+        const data = window.AppState.getData();
+        if (!data.settings) data.settings = {};
+        data.settings.maxPauseMinutes = val;
+        window.AppState.save();
+        window.AppUI.showToast(isAr() ? `تم ضبط حد الإيقاف المؤقت على ${val} دقائق` : `Max pause set to ${val} min`, 'success');
       };
     }
 

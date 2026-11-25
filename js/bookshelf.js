@@ -9,6 +9,57 @@ window.BookshelfModule = (function () {
   let visibleShelvesCount = 3;
   let cachedShelfKey = '';
   let cachedShelfHtml = '';
+  let recentBookId = '';
+  let recentBookTimer = null;
+
+  function markNewlyAddedBook(bookId) {
+    recentBookId = bookId || '';
+    cachedShelfKey = '';
+    if (recentBookTimer) clearTimeout(recentBookTimer);
+    recentBookTimer = setTimeout(() => {
+      recentBookId = '';
+      cachedShelfKey = '';
+    }, 3500);
+  }
+
+  function getBookTimestamps(book) {
+    if (!book) return { startMs: null, endMs: null };
+    let startMs = book.startedAt ? Number(book.startedAt) : null;
+    let endMs = book.endedAt ? Number(book.endedAt) : null;
+    const durMs = Math.max(60000, (Number(book.durationSec) || ((Number(book.minutes) || 0) * 60)) * 1000);
+    if (!endMs && book.createdAt && String(book.createdAt).includes('T')) {
+      const parsed = Date.parse(book.createdAt);
+      if (!Number.isNaN(parsed)) endMs = parsed;
+    }
+    if (!startMs && endMs) startMs = endMs - durMs;
+    if (!endMs && startMs) endMs = startMs + durMs;
+    return { startMs, endMs };
+  }
+
+  function formatShortTime(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    try {
+      const isAr = !!(window.I18n && window.I18n.isRTL());
+      return d.toLocaleTimeString(isAr ? 'ar-IQ' : [], { hour: 'numeric', minute: '2-digit' });
+    } catch (e) {
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+  }
+
+  function toTimeInputVal(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function formatBookTimeRange(book) {
+    const { startMs, endMs } = getBookTimestamps(book);
+    if (!startMs || !endMs) return '';
+    return `${formatShortTime(startMs)} – ${formatShortTime(endMs)}`;
+  }
 
   function filterBooksByPeriod(allBooks, period) {
     const todayISO = window.AppState.getLocalTodayISO();
@@ -296,7 +347,7 @@ window.BookshelfModule = (function () {
     const darkKey = window.AppState.getIsDark() ? 'd' : 'l';
     const selKey = multiSelectMode ? ('m:' + [...selectedIds].sort().join(',')) : 'n';
     const todayISO = window.AppState.getLocalTodayISO();
-    const booksSig = `${data.books.length}|${data.updatedAt || 0}|${style}|${langKey}|${darkKey}|${selKey}|${visibleShelvesCount}|${shelfPeriod}|${todayISO}`;
+    const booksSig = `${data.books.length}|${data.updatedAt || 0}|${style}|${langKey}|${darkKey}|${selKey}|${visibleShelvesCount}|${shelfPeriod}|${todayISO}|${recentBookId}`;
     if (booksSig === cachedShelfKey && cachedShelfHtml) {
       return cachedShelfHtml;
     }
@@ -329,14 +380,18 @@ window.BookshelfModule = (function () {
                 const lvl = getBookLevel(book.minutes, book.completed);
                 const isSel = selectedIds.has(book.id);
                 const tipParts = [getLevelLabel(lvl), `${Math.round(book.minutes)}${t('minShort')}`];
+                const tRange = formatBookTimeRange(book);
+                if (tRange) tipParts.push(tRange);
                 if (tag) tipParts.push(tag.name);
                 if (subj) tipParts.push(subj.name);
+                const isNew = book.id === recentBookId;
+                const animCls = isNew ? (lvl.gold ? 'book-slide-in book-gold-shimmer' : 'book-slide-in') : '';
                 return `
                   <button type="button"
                     data-book-id="${window.AppUI.escapeHtml(book.id)}"
                     style="touch-action:manipulation;"
                     title="${window.AppUI.escapeHtml(tipParts.join(' • '))}"
-                    class="book-item group relative flex flex-col items-center focus:outline-none cursor-pointer">
+                    class="book-item ${animCls} group relative flex flex-col items-center focus:outline-none cursor-pointer">
                     ${renderBookSVG(book, isSel)}
                   </button>
                 `;
@@ -530,7 +585,7 @@ window.BookshelfModule = (function () {
     if (!book) return;
 
     const lvl = getBookLevel(book.minutes, book.completed);
-    const pendingTasks = window.TasksModule ? window.TasksModule.getPendingSuggestions() : [];
+    const pendingTasks = [];
     const currentSubj = resolveBookSubject(book);
     const currentSubjId = book.subjectId || (currentSubj ? currentSubj.id : '');
 
@@ -563,10 +618,25 @@ window.BookshelfModule = (function () {
       title: t('editBookTitle', { lvl: getLevelLabel(lvl), m: Math.round(book.minutes) }),
       bodyHtml: `
         <div class="space-y-3">
+          ${(() => {
+            const { startMs, endMs } = getBookTimestamps(book);
+            const ar = !!(window.I18n && window.I18n.isRTL());
+            return `
           <div>
             <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${t('dateLabel')}</label>
             <input id="edit-book-date" type="date" value="${window.AppUI.escapeHtml(book.date)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm"/>
           </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${ar ? 'وقت البداية' : 'Start Time'}</label>
+              <input id="edit-book-start" type="time" value="${window.AppUI.escapeHtml(toTimeInputVal(startMs))}" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${ar ? 'وقت النهاية' : 'End Time'}</label>
+              <input id="edit-book-end" type="time" value="${window.AppUI.escapeHtml(toTimeInputVal(endMs))}" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"/>
+            </div>
+          </div>`;
+          })()}
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${t('tagLabel')}</label>
@@ -582,7 +652,7 @@ window.BookshelfModule = (function () {
             </div>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${t('taskLabel')}</label>
+            <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${t('noteLabel')}</label>
             <input id="edit-book-task" type="text" value="${window.AppUI.escapeHtml(book.taskTitle || '')}" placeholder="${window.AppUI.escapeHtml(t('taskNotePlaceholder'))}" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm"/>
             <input id="edit-book-task-id" type="hidden" value="${window.AppUI.escapeHtml(book.taskId || '')}"/>
             ${suggestionsHtml}
@@ -648,6 +718,20 @@ window.BookshelfModule = (function () {
       delete book.subjectColor;
       book.taskTitle = newTaskTitle;
       book.taskId = newTaskId;
+      const sVal = document.getElementById('edit-book-start') ? document.getElementById('edit-book-start').value : '';
+      const eVal = document.getElementById('edit-book-end') ? document.getElementById('edit-book-end').value : '';
+      if (sVal && newDate) {
+        const [y, m, d] = newDate.split('-').map(Number);
+        const [sh, sm] = sVal.split(':').map(Number);
+        book.startedAt = new Date(y, m - 1, d, sh, sm, 0, 0).getTime();
+      }
+      if (eVal && newDate) {
+        const [y, m, d] = newDate.split('-').map(Number);
+        const [eh, em] = eVal.split(':').map(Number);
+        let endTs = new Date(y, m - 1, d, eh, em, 0, 0).getTime();
+        if (book.startedAt && endTs < book.startedAt) endTs += 86400000;
+        book.endedAt = endTs;
+      }
       window.AppState.markLedgerDirty();
       window.AppState.save();
       window.AppUI.closeModal();
@@ -661,6 +745,8 @@ window.BookshelfModule = (function () {
     getBookLevel,
     renderBookSVG,
     renderSection,
-    bindEvents
+    bindEvents,
+    markNewlyAddedBook,
+    formatBookTimeRange
   };
 })();

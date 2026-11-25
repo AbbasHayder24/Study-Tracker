@@ -53,6 +53,7 @@ window.AppState = (function () {
       settings: {
         lang: null, // 'en' | 'ar' | null
         theme: null, // 'dark' | 'light' | null (auto)
+        palette: 'ivory', // 'ivory' | 'oxford' | 'burgundy'
         shelfStyle: 'classic3d', // 'classic3d' | 'minimal'
         soundEnabled: true,
         notificationsEnabled: false,
@@ -63,18 +64,15 @@ window.AppState = (function () {
         focusTagId: 'study',
         focusLinkType: 'subject',
         focusSubjectId: '',
-        dayStartHour: 0
+        dayStartHour: 0,
+        maxPauseMinutes: 5
       },
       subjects: JSON.parse(JSON.stringify(C.DEFAULT_SUBJECTS)),
       tags: JSON.parse(JSON.stringify(C.DEFAULT_TAGS)),
       dailyLogs: {},
       books: [],
       tasks: [],
-      habits: [
-        { id: 'hab_1', title: 'Daily Anki flashcards', icon: '🧠', targetDaysPerWeek: 7, completions: {} },
-        { id: 'hab_2', title: 'Clear desk before studying', icon: '🧹', targetDaysPerWeek: 6, completions: {} },
-        { id: 'hab_3', title: 'Write end-of-day summary', icon: '📝', targetDaysPerWeek: 5, completions: {} }
-      ],
+      habits: [],
       reviews: {},
       resolvedPenalties: {}
     };
@@ -83,13 +81,14 @@ window.AppState = (function () {
   data = createDefaultState();
   let ledgerDirty = true;
   let cachedLedger = null;
-  const VALID_TABS = new Set(['focus', 'tasks', 'habits', 'stats', 'challenge', 'settings']);
+  const VALID_TABS = new Set(['focus', 'stats', 'challenge', 'settings']);
   let activeTab = 'focus';
   try {
     const savedTab = localStorage.getItem('study_tracker_active_tab');
     if (savedTab && VALID_TABS.has(savedTab)) activeTab = savedTab;
   } catch (e) {}
   let isDark = false;
+  let currentPalette = 'ivory';
   let syncStatus = { state: 'idle', lastSyncedAt: null, lastError: '' };
 
   function markLedgerDirty() { ledgerDirty = true; }
@@ -271,6 +270,9 @@ window.AppState = (function () {
     if (data.settings && (data.settings.theme === 'dark' || data.settings.theme === 'light')) {
       applyTheme(data.settings.theme === 'dark', true, false);
     }
+    if (data.settings && (data.settings.palette === 'ivory' || data.settings.palette === 'oxford' || data.settings.palette === 'burgundy')) {
+      applyPalette(data.settings.palette, true, false);
+    }
     if (window.FocusModule && window.FocusModule.syncFromSettings) {
       window.FocusModule.syncFromSettings();
     }
@@ -415,13 +417,7 @@ window.AppState = (function () {
     demo.startDate = startDate;
     demo.startDateUpdatedAt = Date.now();
 
-    demo.tasks = [
-      { id: 't_1', title: 'Finish cranial nerves anatomy chapter', subjectId: 'subj_anat', priority: 'high', done: false, dueDate: today, createdAt: today },
-      { id: 't_2', title: 'Solve 40 cardiac physiology questions', subjectId: 'subj_phys', priority: 'high', done: true, dueDate: today, createdAt: today },
-      { id: 't_3', title: 'Summarize acute vs chronic inflammation', subjectId: 'subj_path', priority: 'medium', done: false, dueDate: addDaysISO(today, 1), createdAt: today },
-      { id: 't_4', title: 'Review antihypertensives (ACEi / ARBs)', subjectId: 'subj_pharm', priority: 'medium', done: true, dueDate: addDaysISO(today, -1), createdAt: today },
-      { id: 't_5', title: 'UWorld block — Respiratory system', subjectId: 'subj_usmle', priority: 'low', done: false, dueDate: addDaysISO(today, 2), createdAt: today }
-    ];
+    demo.tasks = [];
 
     const sampleDurations = [20, 35, 55, 80, 45, 60, 30, 90, 25];
     const tagIds = ['study', 'study', 'study', 'anki', 'reading', 'research'];
@@ -442,7 +438,7 @@ window.AppState = (function () {
       if (i >= 20) {
         const mins = sampleDurations[i % sampleDurations.length];
         const tId = tagIds[i % tagIds.length];
-        const linkedTask = demo.tasks[i % demo.tasks.length];
+        const demoSubj = demo.subjects[i % demo.subjects.length];
         demo.books.push({
           id: `bk_demo_${i}`,
           date: iso,
@@ -450,10 +446,12 @@ window.AppState = (function () {
           durationSec: mins * 60,
           mode: i % 3 === 0 ? 'stopwatch' : 'pomodoro',
           tagId: tId,
-          subjectId: linkedTask.subjectId,
-          taskId: linkedTask.id,
-          taskTitle: linkedTask.title,
+          subjectId: demoSubj ? demoSubj.id : '',
+          taskId: '',
+          taskTitle: demoSubj ? demoSubj.name : '',
           completed: true,
+          startedAt: new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 18 + (i % 4), 15, 0).getTime(),
+          endedAt: new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 18 + (i % 4), 15 + mins, 0).getTime(),
           createdAt: iso
         });
       }
@@ -511,6 +509,13 @@ window.AppState = (function () {
     else if (tg && tg.colorScheme === 'dark') isDark = true;
     else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) isDark = true;
 
+    let savedPal = 'ivory';
+    try {
+      const p = localStorage.getItem('study_tracker_palette');
+      if (p === 'oxford' || p === 'burgundy' || p === 'ivory') savedPal = p;
+    } catch (e) {}
+    currentPalette = savedPal;
+    document.documentElement.setAttribute('data-palette', currentPalette);
     applyTheme(isDark, false, false);
   }
 
@@ -518,7 +523,14 @@ window.AppState = (function () {
     isDark = !!dark;
     document.documentElement.classList.toggle('dark', isDark);
     const tc = document.getElementById('meta-theme-color');
-    if (tc) tc.setAttribute('content', isDark ? '#090C12' : '#F4F0E8');
+    if (tc) {
+      const colors = {
+        ivory: isDark ? '#090C12' : '#F4F0E8',
+        oxford: isDark ? '#07130E' : '#EFF4EF',
+        burgundy: isDark ? '#14090D' : '#F8F1F2'
+      };
+      tc.setAttribute('content', colors[currentPalette] || colors.ivory);
+    }
     if (persist) {
       try {
         localStorage.setItem(C.THEME_KEY, isDark ? 'dark' : 'light');
@@ -537,6 +549,22 @@ window.AppState = (function () {
       } catch (e) {}
     }
   }
+
+  function applyPalette(pal, persist = true, syncToCloud = false) {
+    const clean = (pal === 'oxford' || pal === 'burgundy') ? pal : 'ivory';
+    currentPalette = clean;
+    document.documentElement.setAttribute('data-palette', clean);
+    if (persist) {
+      try { localStorage.setItem('study_tracker_palette', clean); } catch (e) {}
+    }
+    applyTheme(isDark, false, false);
+    if (syncToCloud && data && data.settings) {
+      data.settings.palette = clean;
+      save(true);
+    }
+  }
+
+  function getPalette() { return currentPalette; }
 
   function toggleTheme() {
     applyTheme(!isDark, true, true);
@@ -578,6 +606,8 @@ window.AppState = (function () {
     applyTheme,
     toggleTheme,
     getIsDark,
+    applyPalette,
+    getPalette,
     setActiveTab,
     getActiveTab
   };

@@ -3,22 +3,18 @@
  * bilingual EN/AR toggle, header sync indicator, auto-sync on resume/online, 6-tab navigation
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '55';
+  const ASSET_VER = '61';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
-    { id: 'tasks', key: 'tab_tasks', icon: '✅' },
-    { id: 'habits', key: 'tab_habits', icon: '🔥' },
     { id: 'stats', key: 'tab_stats', icon: '📈' },
-    { id: 'challenge', key: 'tab_challenge', icon: '🏆' },
+    { id: 'challenge', key: 'tab_challenge', icon: '🎯' },
     { id: 'settings', key: 'tab_settings', icon: '⚙️' }
   ];
 
   // Each tab loads only the scripts it needs on first visit
   const TAB_SCRIPTS = {
-    focus: ['js/tasks.js', 'js/bookshelf.js', 'js/groups.js', 'js/focus.js'],
-    tasks: ['js/tasks.js'],
-    habits: ['js/habits.js'],
-    stats: ['js/habits.js', 'js/stats.js'],
+    focus: ['js/bookshelf.js', 'js/groups.js', 'js/focus.js'],
+    stats: ['js/stats.js'],
     challenge: ['js/reviews.js', 'js/challenge.js'],
     settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js']
   };
@@ -92,9 +88,9 @@ window.StudyApp = (function () {
     const headerEl = document.getElementById('app-header-meta');
     if (headerEl) {
       headerEl.innerHTML = `
-        <span class="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold">
-          ${t('todayShort')}: ${window.AppUI.formatHours(today.logged)}/${window.AppUI.formatHours(today.target)}${hUnit}
-        </span>
+        <button id="header-daily-recap-btn" type="button" class="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold hover:opacity-85" title="${isAr ? 'خلاصة اليوم السريعة' : 'Quick Daily Recap'}">
+          ✨ ${t('todayShort')}: ${window.AppUI.formatHours(today.logged)}/${window.AppUI.formatHours(today.target)}${hUnit}
+        </button>
         ${syncBtnHtml}
         <button id="lang-toggle-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[11px] font-extrabold text-slate-700 dark:text-slate-200" title="${window.AppUI.escapeHtml(t('toggleLangTitle'))}">
           ${isAr ? 'EN' : 'ع'}
@@ -103,6 +99,11 @@ window.StudyApp = (function () {
           ${isDark ? '☀️' : '🌙'}
         </button>
       `;
+
+      const recapBtn = document.getElementById('header-daily-recap-btn');
+      if (recapBtn) {
+        recapBtn.onclick = () => openDailyRecapModal();
+      }
 
       const syncBtn = document.getElementById('header-sync-btn');
       if (syncBtn) {
@@ -137,13 +138,21 @@ window.StudyApp = (function () {
     if (!navEl) return;
 
     const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
-    if (!navEl.children.length || lastNavLang !== curLang) {
-      lastNavLang = curLang;
+    const data = window.AppState.getData();
+    const customPlanName = (data && data.settings && data.settings.challenge && data.settings.challenge.name)
+      ? String(data.settings.challenge.name).trim()
+      : '';
+    const shortPlanName = customPlanName
+      ? (customPlanName.length > 10 ? customPlanName.slice(0, 9) + '…' : customPlanName)
+      : t('tab_challenge');
+    const navSig = `${curLang}|${shortPlanName}`;
+    if (!navEl.children.length || lastNavLang !== navSig) {
+      lastNavLang = navSig;
       navEl.innerHTML = TABS.map(tab => `
         <button type="button" data-tab-id="${tab.id}"
           class="flex-1 py-2 px-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition text-slate-500 dark:text-slate-400">
           <span class="text-base leading-none">${tab.icon}</span>
-          <span>${t(tab.key)}</span>
+          <span class="truncate max-w-[60px]">${tab.id === 'challenge' ? window.AppUI.escapeHtml(shortPlanName) : t(tab.key)}</span>
         </button>
       `).join('');
 
@@ -168,7 +177,7 @@ window.StudyApp = (function () {
     });
   }
 
-  const tabDirty = { focus: true, tasks: true, habits: true, stats: true, challenge: true, settings: true };
+  const tabDirty = { focus: true, stats: true, challenge: true, settings: true };
   const tabScrollY = {};
   let currentMountedTab = null;
   let lastDataUpdatedAt = 0;
@@ -185,10 +194,8 @@ window.StudyApp = (function () {
   }
 
   function isModuleReady(tabId) {
-    if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule && window.TasksModule && window.GroupsModule);
-    if (tabId === 'tasks') return !!window.TasksModule;
-    if (tabId === 'habits') return !!window.HabitsModule;
-    if (tabId === 'stats') return !!(window.StatsModule && window.HabitsModule);
+    if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule && window.GroupsModule);
+    if (tabId === 'stats') return !!window.StatsModule;
     if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
     if (tabId === 'settings') return !!(window.SettingsModule && window.ChallengeModule);
     return true;
@@ -205,7 +212,76 @@ window.StudyApp = (function () {
     }
     renderHeader();
     renderMain(animate, true);
-    if (curLang !== lastNavLang) renderNav();
+    renderNav();
+  }
+
+  function openDailyRecapModal() {
+    const ar = !!(window.I18n && window.I18n.isRTL());
+    const data = window.AppState.getData();
+    const today = window.LedgerEngine.getTodaySummary();
+    const todayISO = today.todayISO;
+    const todayBooks = (data.books || []).filter(b => b.date === todayISO && b.completed);
+    const longestMin = todayBooks.reduce((mx, b) => Math.max(mx, Math.round(Number(b.minutes) || 0)), 0);
+
+    const scoreMap = new Map();
+    todayBooks.forEach(b => {
+      const subj = b.subjectId ? window.AppUI.getSubjectById(b.subjectId) : null;
+      const tag = window.AppUI.getTagById(b.tagId);
+      const name = (subj && subj.name) || (tag && String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim()) || (ar ? 'دراسة' : 'Study');
+      scoreMap.set(name, (scoreMap.get(name) || 0) + (Number(b.minutes) || 0));
+    });
+    let topFocus = '—';
+    let topMins = 0;
+    scoreMap.forEach((m, name) => {
+      if (m > topMins) { topMins = m; topFocus = name; }
+    });
+
+    const pct = today.target > 0 ? Math.min(100, Math.round((today.logged / today.target) * 100)) : 0;
+    const existingNote = (data.dailyLogs && data.dailyLogs[todayISO] && data.dailyLogs[todayISO].note) || '';
+    const hUnit = t('hrs');
+
+    window.AppUI.openModal({
+      title: ar ? `✨ خلاصة اليوم (${window.AppUI.formatDate(todayISO)})` : `✨ Daily Recap (${window.AppUI.formatDate(todayISO)})`,
+      bodyHtml: `
+        <div class="space-y-3.5">
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-900/30 border border-indigo-200/60 dark:border-indigo-800/50">
+              <div class="text-[10px] text-slate-500 dark:text-slate-400">${ar ? 'مجموع اليوم' : 'Total Today'}</div>
+              <div class="text-sm font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5">${window.AppUI.formatHours(today.logged)}${hUnit}</div>
+              <div class="text-[9px] text-slate-400">${pct}%</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-900/30 border border-emerald-200/60 dark:border-emerald-800/50">
+              <div class="text-[10px] text-slate-500 dark:text-slate-400">${ar ? 'أطول جلسة' : 'Longest'}</div>
+              <div class="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">${longestMin}${t('minShort')}</div>
+              <div class="text-[9px] text-slate-400">${todayBooks.length} ${t('booksWord')}</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-900/30 border border-amber-200/60 dark:border-amber-800/50">
+              <div class="text-[10px] text-slate-500 dark:text-slate-400">${ar ? 'أكثر تركيزاً' : 'Top Focus'}</div>
+              <div class="text-xs font-extrabold text-amber-600 dark:text-amber-400 mt-1 truncate">${window.AppUI.escapeHtml(topFocus)}</div>
+              <div class="text-[9px] text-slate-400">${topMins ? Math.round(topMins) + t('minShort') : '—'}</div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'ملاحظة سريعة عن إنجاز اليوم' : 'Quick note on today\'s progress'}</label>
+            <input id="recap-daily-note" type="text" maxlength="140" value="${window.AppUI.escapeHtml(existingNote)}" placeholder="${ar ? 'مثال: أنهيت فصل القلبية بتركيز ممتاز...' : 'e.g. Finished cardiology chapter with great focus...'}" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs"/>
+          </div>
+        </div>
+      `,
+      footerHtml: `
+        <button type="button" onclick="window.AppUI.closeModal()" class="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${t('cancel')}</button>
+        <button id="recap-save-note" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">${t('save')}</button>
+      `
+    });
+    const saveBtn = document.getElementById('recap-save-note');
+    if (saveBtn) {
+      saveBtn.onclick = () => {
+        const noteVal = (document.getElementById('recap-daily-note').value || '').trim();
+        window.LedgerEngine.setDayLog(todayISO, today.logged, noteVal);
+        window.AppUI.closeModal();
+        window.AppUI.showToast(ar ? 'تم حفظ خلاصة اليوم ✨' : 'Daily recap saved ✨', 'success');
+        renderAll();
+      };
+    }
   }
 
   function renderMain(animate = false, forceCurrent = false) {
@@ -252,8 +328,6 @@ window.StudyApp = (function () {
       lastDataUpdatedAt = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
       let html = '';
       if (active === 'focus') html = window.FocusModule.render();
-      else if (active === 'tasks') html = window.TasksModule.render();
-      else if (active === 'habits') html = window.HabitsModule.render();
       else if (active === 'stats') html = window.StatsModule.render();
       else if (active === 'challenge') html = window.ChallengeModule.render();
       else if (active === 'settings') html = window.SettingsModule.render();
@@ -263,8 +337,6 @@ window.StudyApp = (function () {
 
       const scopedCb = () => renderActiveTabScoped(false);
       if (active === 'focus') window.FocusModule.bindEvents(scopedCb);
-      else if (active === 'tasks') window.TasksModule.bindEvents(scopedCb);
-      else if (active === 'habits') window.HabitsModule.bindEvents(scopedCb);
       else if (active === 'stats') window.StatsModule.bindEvents(scopedCb);
       else if (active === 'challenge') window.ChallengeModule.bindEvents(scopedCb);
       else if (active === 'settings') window.SettingsModule.bindEvents(scopedCb);

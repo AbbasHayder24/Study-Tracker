@@ -371,6 +371,37 @@ window.PushManagerClient = (function () {
     };
   }
 
+  async function showOngoingTimerNotification(title, body) {
+    if (typeof window.Notification === 'undefined' || Notification.permission !== 'granted') return false;
+    try {
+      const reg = await registerServiceWorker();
+      if (reg && typeof reg.showNotification === 'function') {
+        await reg.showNotification(title, {
+          body,
+          icon: './image.png',
+          badge: './image.png',
+          tag: 'study-tracker-live-timer',
+          requireInteraction: true,
+          silent: true,
+          renotify: false,
+          data: { url: './' }
+        });
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  async function clearOngoingTimerNotification() {
+    try {
+      const reg = await registerServiceWorker();
+      if (reg && typeof reg.getNotifications === 'function') {
+        const list = await reg.getNotifications({ tag: 'study-tracker-live-timer' });
+        list.forEach(n => { try { n.close(); } catch (e) {} });
+      }
+    } catch (e) {}
+  }
+
   async function showLocalNotification(title, body) {
     try {
       const reg = await registerServiceWorker();
@@ -410,6 +441,8 @@ window.PushManagerClient = (function () {
     showLocalNotification,
     enableUnifiedNotifications,
     disableUnifiedNotifications,
-    sendUnifiedTestNotification
+    sendUnifiedTestNotification,
+    showOngoingTimerNotification,
+    clearOngoingTimerNotification
   };
 })();

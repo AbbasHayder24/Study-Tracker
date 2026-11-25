@@ -17,7 +17,11 @@ window.FocusModule = (function () {
   let isPaused = false;
   let accumulatedSec = 0;
   let startedAt = null;
+  let pausedAt = null;
+  let sessionOriginAt = null;
   let sessionId = null;
+  let zenMode = false;
+  let wakeLockSentinel = null;
   let totalSec = 25 * 60;
   let intervalId = null;
   let lastRerender = null;
@@ -96,6 +100,19 @@ window.FocusModule = (function () {
     return targetMinutes === 0 ? 5 : targetMinutes * 60;
   }
 
+  function getMaxPauseSec() {
+    const data = window.AppState ? window.AppState.getData() : null;
+    const m = data && data.settings ? Number(data.settings.maxPauseMinutes) : 5;
+    const clamped = Number.isFinite(m) ? Math.max(3, Math.min(7, Math.round(m))) : 5;
+    return clamped * 60;
+  }
+
+  function getPauseRemainingSec() {
+    if (!isRunning || !isPaused || !pausedAt) return getMaxPauseSec();
+    const elapsedPause = Math.max(0, Math.floor((Date.now() - pausedAt) / 1000));
+    return Math.max(0, getMaxPauseSec() - elapsedPause);
+  }
+
   function getLiveElapsedSec() {
     if (!isRunning) return 0;
     if (isPaused || !startedAt) return accumulatedSec;
@@ -117,6 +134,8 @@ window.FocusModule = (function () {
           isPaused,
           accumulatedSec,
           startedAt,
+          pausedAt,
+          sessionOriginAt,
           updatedAt: Date.now()
         }
       : { isRunning: false, updatedAt: Date.now() };
@@ -165,6 +184,8 @@ window.FocusModule = (function () {
       isPaused = !!st.isPaused;
       accumulatedSec = Number(st.accumulatedSec) || 0;
       startedAt = st.startedAt ? Number(st.startedAt) : null;
+      pausedAt = st.pausedAt ? Number(st.pausedAt) : null;
+      sessionOriginAt = st.sessionOriginAt ? Number(st.sessionOriginAt) : startedAt;
     } catch (e) {}
   }
 
@@ -181,7 +202,11 @@ window.FocusModule = (function () {
       isPaused = false;
       accumulatedSec = 0;
       startedAt = null;
+      pausedAt = null;
+      sessionOriginAt = null;
       sessionId = null;
+      try { document.title = 'Study Tracker'; } catch (e) {}
+      if (window.PushManagerClient && window.PushManagerClient.clearOngoingTimerNotification) window.PushManagerClient.clearOngoingTimerNotification();
       try {
         localStorage.removeItem(TIMER_KEY);
       } catch (e) {}
@@ -200,16 +225,15 @@ window.FocusModule = (function () {
     isPaused = !!st.isPaused;
     accumulatedSec = Number(st.accumulatedSec) || 0;
     startedAt = st.startedAt ? Number(st.startedAt) : null;
+    pausedAt = st.pausedAt ? Number(st.pausedAt) : null;
+    sessionOriginAt = st.sessionOriginAt ? Number(st.sessionOriginAt) : startedAt;
 
     try {
       localStorage.setItem(TIMER_KEY, JSON.stringify(st));
     } catch (e) {}
 
-    if (!isPaused && lastRerender) {
+    if (lastRerender) {
       runTickInterval(lastRerender);
-    } else if (isPaused && intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
     }
   }
 
@@ -239,8 +263,42 @@ window.FocusModule = (function () {
     window.AppState.save();
   }
 
+  function autoResumeFromPause(rerender) {
+    const maxSec = getMaxPauseSec();
+    startedAt = pausedAt ? (pausedAt + maxSec * 1000) : Date.now();
+    pausedAt = null;
+    isPaused = false;
+    saveTimerState(true);
+    notifyOngoingTimer();
+    if (mode === 'pomodoro' && window.PushManagerClient) {
+      const remSec = Math.max(1, totalSec - getLiveElapsedSec());
+      window.PushManagerClient.scheduleTimerPush(remSec, buildScheduledPushMeta());
+    }
+    if (window.AppUI) {
+      window.AppUI.showToast(
+        isAr() ? 'انتهت مهلة الإيقاف المؤقت — تم استئناف المؤقت تلقائياً ⏱️' : 'Pause limit reached — timer resumed automatically ⏱️',
+        'warning'
+      );
+    }
+    if (rerender) rerender();
+  }
+
   function tickCheck(rerender) {
-    if (!isRunning || isPaused) return;
+    if (!isRunning) return;
+    if (isPaused) {
+      const remPause = getPauseRemainingSec();
+      if (remPause <= 0) {
+        autoResumeFromPause(rerender || lastRerender);
+        return;
+      }
+      const subEl = document.getElementById('focus-status-sub');
+      if (subEl) {
+        subEl.textContent = isAr()
+          ? `متوقف مؤقتاً • متبقي ${formatMMSS(remPause)}`
+          : `Paused • ${formatMMSS(remPause)} left`;
+      }
+      return;
+    }
     const elapsed = getLiveElapsedSec();
     if (mode === 'pomodoro' && elapsed >= totalSec) {
       finishSession(true, rerender || lastRerender, true);
@@ -305,18 +363,76 @@ window.FocusModule = (function () {
     return buildRichNotificationMeta(mins, false);
   }
 
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      }
+    } catch (e) {}
+  }
+
+  function releaseWakeLock() {
+    try {
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release();
+        wakeLockSentinel = null;
+      }
+    } catch (e) {}
+  }
+
+  function setZenMode(active) {
+    zenMode = !!active;
+    document.body.classList.toggle('zen-mode-active', zenMode);
+    if (zenMode) requestWakeLock();
+    else releaseWakeLock();
+  }
+
+  function notifyOngoingTimer() {
+    if (!window.PushManagerClient || !window.PushManagerClient.showOngoingTimerNotification) return;
+    const ar = isAr();
+    const tag = window.AppUI ? window.AppUI.getTagById(selectedTagId) : null;
+    const subj = (linkType === 'subject' && selectedSubjectId && window.AppUI) ? window.AppUI.getSubjectById(selectedSubjectId) : null;
+    const label = (subj && subj.name) || (tag && String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim()) || (ar ? 'دراسة' : 'Study');
+    if (mode === 'pomodoro') {
+      const remMins = Math.max(1, Math.ceil(Math.max(0, totalSec - getLiveElapsedSec()) / 60));
+      const endClk = formatEndClock(remMins);
+      window.PushManagerClient.showOngoingTimerNotification(
+        ar ? `⏱️ مؤقت التركيز يعمل — ${label}` : `⏱️ Focus Timer Running — ${label}`,
+        ar ? `ينتهي الساعة ${endClk} • اضغط للعودة للتطبيق` : `Ends at ${endClk} • Tap to return`
+      );
+    } else {
+      const startClk = new Date(sessionOriginAt || Date.now()).toLocaleTimeString(ar ? 'ar-IQ' : [], { hour: 'numeric', minute: '2-digit' });
+      window.PushManagerClient.showOngoingTimerNotification(
+        ar ? `⏱️ Stopwatch يعمل — ${label}` : `⏱️ Stopwatch Running — ${label}`,
+        ar ? `بدأ الساعة ${startClk} • اضغط للعودة للتطبيق` : `Started at ${startClk} • Tap to return`
+      );
+    }
+  }
+
   function startTimer(rerender) {
     if (isRunning) return;
     window.AppUI.unlockAudio();
     totalSec = getConfiguredTotalSec();
     accumulatedSec = 0;
     startedAt = Date.now();
+    sessionOriginAt = startedAt;
     sessionId = 'bk_' + startedAt;
     isRunning = true;
     isPaused = false;
     saveTimerState(true);
-    if (mode === 'pomodoro' && window.PushManagerClient) {
-      window.PushManagerClient.scheduleTimerPush(totalSec, buildScheduledPushMeta());
+    notifyOngoingTimer();
+    if (window.PushManagerClient) {
+      if (mode === 'pomodoro') {
+        window.PushManagerClient.scheduleTimerPush(totalSec, buildScheduledPushMeta());
+      } else {
+        const ar = isAr();
+        window.PushManagerClient.scheduleTimerPush(3600, {
+          sessionId,
+          title: ar ? '⏱️ Stopwatch ما زال يعمل (60 دقيقة)' : '⏱️ Stopwatch Still Running (60m)',
+          body: ar ? 'مرت ساعة على جلستك — استمر أو أوقف المؤقت لحفظ كتابك 📚' : 'You have been studying for 1 hour — keep going or finish to save your book 📚'
+        });
+      }
     }
     runTickInterval(rerender);
     if (rerender) rerender();
@@ -327,17 +443,19 @@ window.FocusModule = (function () {
     if (!isPaused) {
       accumulatedSec = getLiveElapsedSec();
       startedAt = null;
+      pausedAt = Date.now();
       isPaused = true;
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
+      runTickInterval(rerender);
       if (window.PushManagerClient) {
         window.PushManagerClient.cancelTimerPush();
+        if (window.PushManagerClient.clearOngoingTimerNotification) window.PushManagerClient.clearOngoingTimerNotification();
       }
+      try { document.title = 'Study Tracker'; } catch (e) {}
     } else {
       startedAt = Date.now();
+      pausedAt = null;
       isPaused = false;
+      notifyOngoingTimer();
       if (mode === 'pomodoro' && window.PushManagerClient) {
         const remSec = Math.max(1, totalSec - accumulatedSec);
         window.PushManagerClient.scheduleTimerPush(remSec, buildScheduledPushMeta());
@@ -367,6 +485,8 @@ window.FocusModule = (function () {
       ? totalSec
       : (mode === 'pomodoro' && totalSec > 0 ? Math.min(totalSec, liveElapsed) : liveElapsed);
     const finishedId = sessionId || ('bk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+    const finishedEndMs = Date.now();
+    const finishedStartMs = sessionOriginAt || (finishedEndMs - Math.max(1, finalElapsed) * 1000);
 
     if (intervalId) {
       clearInterval(intervalId);
@@ -376,10 +496,15 @@ window.FocusModule = (function () {
     isPaused = false;
     accumulatedSec = 0;
     startedAt = null;
+    pausedAt = null;
+    sessionOriginAt = null;
     sessionId = null;
+    if (zenMode) setZenMode(false);
+    try { document.title = 'Study Tracker'; } catch (e) {}
     saveTimerState(false);
     if (window.PushManagerClient) {
       window.PushManagerClient.cancelTimerPush();
+      if (window.PushManagerClient.clearOngoingTimerNotification) window.PushManagerClient.clearOngoingTimerNotification();
     }
 
     const data = window.AppState.getData();
@@ -414,10 +539,15 @@ window.FocusModule = (function () {
       taskId: linkedTask ? linkedTask.id : '',
       taskTitle,
       completed,
-      createdAt: new Date().toISOString()
+      startedAt: finishedStartMs,
+      endedAt: finishedEndMs,
+      createdAt: new Date(finishedEndMs).toISOString()
     };
 
     data.books.push(book);
+    if (window.BookshelfModule && window.BookshelfModule.markNewlyAddedBook) {
+      window.BookshelfModule.markNewlyAddedBook(book.id);
+    }
 
     const tag = window.AppUI.getTagById(selectedTagId);
     const roundedM = Math.round(actualMinutes);
@@ -452,20 +582,38 @@ window.FocusModule = (function () {
     const elapsed = getLiveElapsedSec();
     if (mode === 'pomodoro') {
       const rem = Math.max(0, totalSec - elapsed);
-      clockEl.textContent = formatMMSS(rem);
+      const txt = formatMMSS(rem);
+      clockEl.textContent = txt;
+      try { document.title = `${txt} • Study Tracker`; } catch (e) {}
       if (ringEl && totalSec > 0) {
         const circumference = 2 * Math.PI * 84;
         const progress = Math.min(1, elapsed / totalSec);
         ringEl.style.strokeDashoffset = String(circumference * (1 - progress));
       }
     } else {
-      clockEl.textContent = formatMMSS(elapsed);
+      const txt = formatMMSS(elapsed);
+      clockEl.textContent = txt;
+      try { document.title = `${txt} • Study Tracker`; } catch (e) {}
     }
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && isRunning && !isPaused) {
-      tickCheck(lastRerender);
+    if (document.visibilityState === 'visible') {
+      if (zenMode) requestWakeLock();
+      if (isRunning) {
+        tickCheck(lastRerender);
+        if (isRunning && !intervalId) runTickInterval(lastRerender);
+      }
+    } else {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && zenMode) {
+      setZenMode(false);
     }
   });
 
@@ -474,7 +622,7 @@ window.FocusModule = (function () {
     const data = window.AppState.getData();
     const tag = window.AppUI.getTagById(selectedTagId);
     const activeColor = tag ? tag.color : '#6366f1';
-    const pendingTasks = window.TasksModule ? window.TasksModule.getPendingSuggestions() : [];
+
 
     const elapsed = getLiveElapsedSec();
     const circumference = 2 * Math.PI * 84;
@@ -490,25 +638,34 @@ window.FocusModule = (function () {
     const knobPos = getKnobXY(targetMinutes === 0 ? 5 : targetMinutes);
 
     const statusSub = isPaused
-      ? t('paused')
+      ? (isAr() ? `متوقف مؤقتاً • متبقي ${formatMMSS(getPauseRemainingSec())}` : `Paused • ${formatMMSS(getPauseRemainingSec())} left`)
       : (mode === 'pomodoro' ? formatDurationLabel(targetMinutes) : t('countingUp'));
 
     return `
       <div class="space-y-4">
-        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div class="flex items-center justify-between mb-3">
+        <div id="focus-timer-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div class="zen-hide flex items-center justify-between mb-3">
             <div class="flex items-center gap-1.5">
               <h2 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('focusSession')}</h2>
               ${window.AppUI.infoButtonHtml('info-focus-btn')}
             </div>
-            ${mode === 'pomodoro' ? `
-              <button id="focus-quick-test" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[11px] font-medium">
-                ${t('quickTest')}
+            <div class="flex items-center gap-1.5">
+              <button id="focus-zen-btn" type="button" class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 text-[11px] font-bold" title="${isAr() ? 'وضع التركيز الكامل (Zen Mode)' : 'Zen Focus Mode'}">
+                🧘 Zen
               </button>
-            ` : ''}
+              ${mode === 'pomodoro' ? `
+                <button id="focus-quick-test" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[11px] font-medium">
+                  ${t('quickTest')}
+                </button>
+              ` : ''}
+            </div>
           </div>
 
-          <div class="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl mb-4">
+          <button id="focus-zen-exit" type="button" class="zen-only px-3.5 py-2 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-lg">
+            ✕ ${isAr() ? 'خروج من Zen' : 'Exit Zen'}
+          </button>
+
+          <div class="zen-hide flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl mb-4">
             <button id="mode-pomodoro" ${isRunning ? 'disabled' : ''} class="flex-1 py-2 rounded-lg text-xs font-bold transition ${mode === 'pomodoro' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
               ${t('pomodoro')}
             </button>
@@ -559,55 +716,25 @@ window.FocusModule = (function () {
           ` : ''}
 
           ${(() => {
+            linkType = 'subject';
+            selectedTaskId = '';
             const linkedSubjects = (data.subjects || []).filter(s => s.defaultTagId === selectedTagId);
-            const hasLinkedSubjects = linkedSubjects.length > 0;
-            if (linkType === 'subject' && !hasLinkedSubjects) {
-              selectedSubjectId = '';
-            }
-            const showRightCol = (linkType === 'task') || hasLinkedSubjects;
+            const subjList = linkedSubjects.length ? linkedSubjects : (data.subjects || []);
             return `
-          <div class="grid grid-cols-1 ${showRightCol ? 'sm:grid-cols-2' : ''} gap-2.5 mb-4 items-end">
+          <div class="zen-hide grid grid-cols-1 ${subjList.length ? 'sm:grid-cols-2' : ''} gap-2.5 mb-4 items-end">
             <div>
-              <div class="flex items-center justify-between mb-1" style="min-height:26px">
-                <label class="text-[11px] font-medium text-slate-500 dark:text-slate-400">${t('tagLabel')}</label>
-                ${!showRightCol ? `
-                  <button type="button" id="focus-link-task" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-900 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                    + ${t('taskLabel')}
-                  </button>
-                ` : ''}
-              </div>
+              <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">${t('tagLabel')}</label>
               <select id="focus-tag-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
                 ${data.tags.map(tg => `<option value="${window.AppUI.escapeHtml(tg.id)}" ${tg.id === selectedTagId ? 'selected' : ''}>${window.AppUI.escapeHtml(tg.name)}</option>`).join('')}
               </select>
             </div>
-            ${showRightCol ? `
+            ${subjList.length ? `
             <div>
-              <div class="flex items-center justify-between mb-1" style="min-height:26px">
-                <label class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  ${linkType === 'subject' ? t('subjectLabel') : t('taskLabel')}
-                </label>
-                <div class="inline-flex rounded-lg bg-slate-100 dark:bg-slate-900 p-0.5 text-[10px]">
-                  ${hasLinkedSubjects ? `
-                    <button type="button" id="focus-link-subject" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md font-bold transition ${linkType === 'subject' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
-                      ${t('subjectLabel')}
-                    </button>
-                  ` : ''}
-                  <button type="button" id="focus-link-task" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md font-bold transition ${linkType === 'task' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
-                    ${t('taskLabel')}
-                  </button>
-                </div>
-              </div>
-              ${linkType === 'subject' ? `
-                <select id="focus-subject-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
-                  <option value="">${window.AppUI.escapeHtml(t('noSubject'))}</option>
-                  ${linkedSubjects.map(s => `<option value="${window.AppUI.escapeHtml(s.id)}" ${s.id === selectedSubjectId ? 'selected' : ''}>${window.AppUI.escapeHtml(s.name)}</option>`).join('')}
-                </select>
-              ` : `
-                <select id="focus-task-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs">
-                  <option value="">${window.AppUI.escapeHtml(t('noTask'))}</option>
-                  ${pendingTasks.map(tk => `<option value="${window.AppUI.escapeHtml(tk.id)}" ${tk.id === selectedTaskId ? 'selected' : ''}>${window.AppUI.escapeHtml(tk.title)}</option>`).join('')}
-                </select>
-              `}
+              <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">${t('subjectLabel')}</label>
+              <select id="focus-subject-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
+                <option value="">${window.AppUI.escapeHtml(t('noSubject'))}</option>
+                ${subjList.map(s => `<option value="${window.AppUI.escapeHtml(s.id)}" ${s.id === selectedSubjectId ? 'selected' : ''}>${window.AppUI.escapeHtml(s.name)}</option>`).join('')}
+              </select>
             </div>
             ` : ''}
           </div>
@@ -630,7 +757,7 @@ window.FocusModule = (function () {
           </div>
         </div>
 
-        <div class="flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 gap-1">
+        <div class="zen-hide flex p-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 gap-1">
           <button type="button" data-focus-bview="shelf" class="flex-1 py-2 px-2 rounded-lg text-xs font-bold transition ${bottomView === 'shelf' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">
             📚 ${isAr() ? 'رف الكتب' : 'Bookshelf'}
           </button>
@@ -639,17 +766,22 @@ window.FocusModule = (function () {
           </button>
         </div>
 
-        ${bottomView === 'group' && window.GroupsModule ? window.GroupsModule.render() : window.BookshelfModule.renderSection()}
+        <div class="zen-hide">${bottomView === 'group' && window.GroupsModule ? window.GroupsModule.render() : window.BookshelfModule.renderSection()}</div>
       </div>
     `;
   }
 
   function bindEvents(rerender) {
     lastRerender = rerender;
-    if (isRunning && !isPaused) {
+    if (isRunning) {
       tickCheck(rerender);
       if (isRunning && !intervalId) runTickInterval(rerender);
     }
+
+    const zenBtn = document.getElementById('focus-zen-btn');
+    if (zenBtn) zenBtn.onclick = () => setZenMode(!zenMode);
+    const zenExitBtn = document.getElementById('focus-zen-exit');
+    if (zenExitBtn) zenExitBtn.onclick = () => setZenMode(false);
 
     const infoBtn = document.getElementById('info-focus-btn');
     if (infoBtn) {

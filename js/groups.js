@@ -445,6 +445,9 @@ window.GroupsModule = (function () {
       window.AppState.save(true, true);
       return { ok: true, groupId: docRef.id, code };
     } catch (e) {
+      if (e && e.code === 'permission-denied') {
+        return { ok: false, error: ar ? 'انشر قواعد FIRESTORE_RULES.txt في Firebase Console أولاً' : 'Publish FIRESTORE_RULES.txt in Firebase Console first' };
+      }
       return { ok: false, error: (e && e.message) ? e.message : (ar ? 'تعذر إنشاء المجموعة' : 'Failed to create group') };
     }
   }
@@ -491,6 +494,9 @@ window.GroupsModule = (function () {
       window.AppState.save(true, true);
       return { ok: true, groupId: gDoc.id, name: gData.name || '' };
     } catch (e) {
+      if (e && e.code === 'permission-denied') {
+        return { ok: false, error: ar ? 'انشر قواعد FIRESTORE_RULES.txt في Firebase Console أولاً' : 'Publish FIRESTORE_RULES.txt in Firebase Console first' };
+      }
       return { ok: false, error: (e && e.message) ? e.message : (ar ? 'تعذر الانضمام للمجموعة' : 'Failed to join group') };
     }
   }
