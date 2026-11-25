@@ -1,28 +1,26 @@
-
-  
-  /**
+/**
  * google-sync.js — 1-Tap Google Account Sign-In & Cloud Sync via Firebase (Auth + Firestore)
  *
  * 👇 الصق إعدادات firebaseConfig الخاصة بك من Firebase Console مكان الكائن أدناه فقط:
  * 👇 Paste your firebaseConfig from Firebase Console below:
  */
-window.GoogleSync = (function() {
+window.GoogleSync = (function () {
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyDw5UpMl3RUEhr_5QhMbk38vOE-e-wnBaA",
-    authDomain: "study-tracker-c2e52.firebaseapp.com",
-    projectId: "study-tracker-c2e52",
-    storageBucket: "study-tracker-c2e52.firebasestorage.app",
-    messagingSenderId: "535559413934",
-    appId: "1:535559413934:web:25f9adca2cb4661f5c4d3f"
+  authDomain: "study-tracker-c2e52.firebaseapp.com",
+  projectId: "study-tracker-c2e52",
+  storageBucket: "study-tracker-c2e52.firebasestorage.app",
+  messagingSenderId: "535559413934",
+  appId: "1:535559413934:web:25f9adca2cb4661f5c4d3f"
   };
-  
+
   const FB_VER = '10.14.1';
   const FB_SCRIPTS = [
     `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app-compat.js`,
     `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth-compat.js`,
     `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore-compat.js`
   ];
-  
+
   let initPromise = null;
   let auth = null;
   let db = null;
@@ -30,11 +28,11 @@ window.GoogleSync = (function() {
   let syncInFlight = false;
   let pushDebounce = null;
   let lastSyncTime = 0;
-  
+
   function isAr() {
     return !!(window.I18n && window.I18n.isRTL());
   }
-  
+
   function isConfigured() {
     return !!(
       FIREBASE_CONFIG &&
@@ -44,7 +42,7 @@ window.GoogleSync = (function() {
       !String(FIREBASE_CONFIG.projectId).startsWith('PASTE_')
     );
   }
-  
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       if (document.querySelector(`script[src="${src}"]`)) return resolve();
@@ -56,7 +54,7 @@ window.GoogleSync = (function() {
       document.head.appendChild(s);
     });
   }
-  
+
   async function ensureInit() {
     if (!isConfigured()) return false;
     if (auth && db) return true;
@@ -71,12 +69,12 @@ window.GoogleSync = (function() {
         }
         auth = window.firebase.auth();
         db = window.firebase.firestore();
-        
+
         // Handle redirect sign-in result (used on iOS standalone PWA)
         try {
           await auth.getRedirectResult();
         } catch (e) {}
-        
+
         auth.onAuthStateChanged((user) => {
           const prevUid = currentUser ? currentUser.uid : null;
           currentUser = user || null;
@@ -100,7 +98,7 @@ window.GoogleSync = (function() {
             }
           }
         });
-        
+
         hookAutoSave();
         return true;
       })().catch((err) => {
@@ -110,12 +108,12 @@ window.GoogleSync = (function() {
     }
     return initPromise;
   }
-  
+
   function hookAutoSave() {
     if (!window.AppState || window.AppState.__googleSyncHooked) return;
     const origSave = window.AppState.save;
     window.AppState.__googleSyncHooked = true;
-    window.AppState.save = function(triggerSync = true, immediate = false) {
+    window.AppState.save = function (triggerSync = true, immediate = false) {
       const res = origSave.apply(this, arguments);
       if (triggerSync && currentUser && db) {
         if (pushDebounce) clearTimeout(pushDebounce);
@@ -126,7 +124,7 @@ window.GoogleSync = (function() {
       return res;
     };
   }
-  
+
   async function pushToCloud(silent = false) {
     if (!currentUser || !db) return { ok: false, error: 'Not signed in' };
     try {
@@ -150,7 +148,69 @@ window.GoogleSync = (function() {
       return { ok: false, error: e.message || 'Sync error' };
     }
   }
-  
+
+  function safeMergeById(localArr, remoteArr, deletedSet) {
+    const map = new Map();
+    (Array.isArray(localArr) ? localArr : []).forEach(item => {
+      if (item && item.id && !deletedSet.has(item.id)) map.set(item.id, item);
+    });
+    (Array.isArray(remoteArr) ? remoteArr : []).forEach(item => {
+      if (!item || !item.id || deletedSet.has(item.id)) return;
+      const existing = map.get(item.id);
+      if (!existing) {
+        map.set(item.id, item);
+      } else {
+        const eTs = Number(existing.updatedAt || 0);
+        const rTs = Number(item.updatedAt || 0);
+        if (rTs > eTs) map.set(item.id, item);
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  function safeMergeData(local, remote) {
+    const deletedSet = new Set([
+      ...(Array.isArray(local.deletedIds) ? local.deletedIds : []),
+      ...(Array.isArray(remote.deletedIds) ? remote.deletedIds : [])
+    ]);
+    const localNewer = (Number(local.updatedAt) || 0) >= (Number(remote.updatedAt) || 0);
+    const mergedLogs = { ...(remote.dailyLogs || {}), ...(local.dailyLogs || {}) };
+    Object.keys(mergedLogs).forEach(iso => {
+      const l = local.dailyLogs && local.dailyLogs[iso];
+      const r = remote.dailyLogs && remote.dailyLogs[iso];
+      if (l && r) {
+        const lTs = Number(l.updatedAt || 0);
+        const rTs = Number(r.updatedAt || 0);
+        mergedLogs[iso] = rTs > lTs ? r : l;
+      }
+    });
+    const mergedHabits = safeMergeById(local.habits, remote.habits, deletedSet).map(h => {
+      const lh = (local.habits || []).find(x => x && x.id === h.id);
+      const rh = (remote.habits || []).find(x => x && x.id === h.id);
+      if (lh && rh) {
+        return { ...h, completions: { ...(rh.completions || {}), ...(lh.completions || {}) } };
+      }
+      return h;
+    });
+    return {
+      ...(localNewer ? remote : local),
+      ...(localNewer ? local : remote),
+      deletedIds: Array.from(deletedSet),
+      settings: localNewer
+        ? { ...(remote.settings || {}), ...(local.settings || {}) }
+        : { ...(local.settings || {}), ...(remote.settings || {}) },
+      subjects: safeMergeById(local.subjects, remote.subjects, deletedSet),
+      tags: safeMergeById(local.tags, remote.tags, deletedSet),
+      books: safeMergeById(local.books, remote.books, deletedSet),
+      tasks: safeMergeById(local.tasks, remote.tasks, deletedSet),
+      habits: mergedHabits,
+      dailyLogs: mergedLogs,
+      reviews: { ...(remote.reviews || {}), ...(local.reviews || {}) },
+      resolvedPenalties: { ...(remote.resolvedPenalties || {}), ...(local.resolvedPenalties || {}) },
+      updatedAt: Math.max(Number(local.updatedAt) || 0, Number(remote.updatedAt) || 0, Date.now())
+    };
+  }
+
   async function syncNow(silent = false) {
     if (syncInFlight) return { ok: false, busy: true };
     if (!isConfigured()) return { ok: false, error: 'Not configured' };
@@ -158,27 +218,35 @@ window.GoogleSync = (function() {
     try {
       await ensureInit();
       if (!currentUser || !db) return { ok: false, error: 'Not signed in' };
-      
+
       const docRef = db.collection('users').doc(currentUser.uid);
       const snap = await docRef.get();
       const localData = window.AppState.getData();
       const localTs = Number(localData.updatedAt) || 0;
-      
+
       if (snap.exists) {
         const remoteDoc = snap.data() || {};
         const remoteData = remoteDoc.payload;
-        const remoteTs = Number(remoteDoc.updatedAt || (remoteData && remoteData.updatedAt)) || 0;
-        
-        if (remoteData && remoteTs > localTs) {
-          window.AppState.replaceData(remoteData, false);
-          lastSyncTime = Date.now();
-          if (!silent && window.AppUI) {
-            window.AppUI.showToast(isAr() ? 'تم سحب أحدث بياناتك من Google' : 'Pulled latest data from Google', 'success');
+        if (remoteData && typeof remoteData === 'object') {
+          const merged = safeMergeData(localData, remoteData);
+          const localStr = JSON.stringify(localData);
+          const mergedStr = JSON.stringify(merged);
+          const remoteStr = JSON.stringify(remoteData);
+          let updatedLocal = false;
+          if (mergedStr !== localStr) {
+            window.AppState.replaceData(merged, false);
+            updatedLocal = true;
           }
-          return { ok: true, updated: true };
+          if (mergedStr !== remoteStr) {
+            await pushToCloud(silent);
+          } else if (!silent && window.AppUI) {
+            window.AppUI.showToast(isAr() ? 'تمت المزامنة مع حساب Google' : 'Synced with Google', 'success');
+          }
+          lastSyncTime = Date.now();
+          return { ok: true, updated: updatedLocal };
         }
       }
-      
+
       const pushRes = await pushToCloud(silent);
       return { ok: pushRes.ok, updated: false };
     } catch (e) {
@@ -190,7 +258,7 @@ window.GoogleSync = (function() {
       syncInFlight = false;
     }
   }
-  
+
   async function signIn() {
     if (!isConfigured()) {
       if (window.AppUI) {
@@ -230,7 +298,7 @@ window.GoogleSync = (function() {
       return { ok: false, error: e.message };
     }
   }
-  
+
   async function signOut() {
     try {
       if (auth) await auth.signOut();
@@ -243,7 +311,7 @@ window.GoogleSync = (function() {
       return { ok: false };
     }
   }
-  
+
   function getUser() {
     return currentUser ? {
       uid: currentUser.uid,
@@ -251,7 +319,7 @@ window.GoogleSync = (function() {
       displayName: currentUser.displayName || ''
     } : null;
   }
-  
+
   // Silently initialize in background if user previously signed in with Google
   if (typeof window !== 'undefined') {
     setTimeout(() => {
@@ -263,7 +331,7 @@ window.GoogleSync = (function() {
         }
       } catch (e) {}
     }, 350);
-    
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && currentUser) {
         syncNow(true).then((res) => {
@@ -274,7 +342,7 @@ window.GoogleSync = (function() {
       }
     });
   }
-  
+
   return {
     isConfigured,
     getUser,

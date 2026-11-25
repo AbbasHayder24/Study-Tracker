@@ -6,9 +6,7 @@
  */
 window.AppState = (function () {
   const C = window.APP_CONFIG;
-  const SYNC_KEY = 'study_tracker_gist_sync_v1';
-  const GIST_FILENAME = 'study-tracker-data.json';
-  let data = null;
+      let data = null;
 
   function getLocalTodayISO(dateObj) {
     let d;
@@ -104,30 +102,11 @@ window.AppState = (function () {
     data.deletedIds = Array.from(set).slice(-1000);
   }
 
-  function getSyncConfig() {
-    try {
-      const raw = localStorage.getItem(SYNC_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) {}
-    return { token: '', gistId: '' };
-  }
+  function getSyncConfig() { return { token: '', gistId: '' }; }
 
-  function setSyncConfig(token, gistId) {
-    try {
-      localStorage.setItem(SYNC_KEY, JSON.stringify({
-        token: (token || '').trim(),
-        gistId: (gistId || '').trim()
-      }));
-    } catch (e) {}
-  }
+  function setSyncConfig() {}
 
-  function clearSyncConfig() {
-    try {
-      localStorage.removeItem(SYNC_KEY);
-    } catch (e) {}
-    pendingPush = false;
-    syncStatus = { state: 'idle', lastSyncedAt: null, lastError: '' };
-  }
+  function clearSyncConfig() {}
 
   function getSyncStatus() {
     return syncStatus;
@@ -234,138 +213,15 @@ window.AppState = (function () {
     };
   }
 
-  async function findExistingGist(token) {
-    try {
-      const res = await fetch('https://api.github.com/gists?per_page=50', {
-        cache: 'no-store',
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github+json'
-        }
-      });
-      if (!res.ok) return null;
-      const list = await res.json();
-      if (!Array.isArray(list)) return null;
-      const match = list.find(g => g && g.files && g.files[GIST_FILENAME]);
-      return match ? match.id : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
   function scheduleCloudPush() {
-    const cfg = getSyncConfig();
-    if (!cfg.token) return;
-    pendingPush = true;
-    if (pushTimer) clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => {
-      syncNow(true);
-    }, 2000);
+    // Cloud sync is handled automatically by GoogleSync (Firebase Firestore)
   }
 
-  async function pushToGist(silent = false) {
-    const cfg = getSyncConfig();
-    if (!cfg.token) return { ok: false, error: 'Missing GitHub token' };
-
-    const payload = {
-      description: 'Academic Study Tracker Auto-Sync Backup',
-      public: false,
-      files: {
-        [GIST_FILENAME]: { content: JSON.stringify(data) }
-      }
-    };
-
-    try {
-      const isCreate = !cfg.gistId;
-      const url = isCreate
-        ? 'https://api.github.com/gists'
-        : `https://api.github.com/gists/${encodeURIComponent(cfg.gistId)}`;
-
-      const res = await fetch(url, {
-        method: isCreate ? 'POST' : 'PATCH',
-        headers: {
-          'Authorization': `token ${cfg.token}`,
-          'Accept': 'application/vnd.github+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const msg = `GitHub API error (${res.status})`;
-        syncStatus = { state: 'error', lastSyncedAt: syncStatus.lastSyncedAt, lastError: msg };
-        if (!silent && window.AppUI) window.AppUI.showToast(msg, 'danger');
-        return { ok: false, error: msg };
-      }
-
-      const json = await res.json();
-      if (isCreate && json.id) {
-        setSyncConfig(cfg.token, json.id);
-      }
-      pendingPush = false;
-      syncStatus = { state: 'ok', lastSyncedAt: Date.now(), lastError: '' };
-      if (!silent && window.AppUI) window.AppUI.showToast(window.I18n ? window.I18n.t('syncedToCloud') : 'Synced to cloud ☁️', 'success');
-      return { ok: true, gistId: json.id || cfg.gistId };
-    } catch (e) {
-      pendingPush = true;
-      const msg = window.I18n ? window.I18n.t('offlineAutoSync') : 'Offline — will auto-sync when back online';
-      syncStatus = { state: 'error', lastSyncedAt: syncStatus.lastSyncedAt, lastError: msg };
-      if (!silent && window.AppUI) window.AppUI.showToast(msg, 'warning');
-      return { ok: false, error: msg };
+  async function syncNow(silent = false) {
+    if (window.GoogleSync && typeof window.GoogleSync.syncNow === 'function') {
+      return window.GoogleSync.syncNow(silent);
     }
-  }
-
-  async function pullFromGist(forceApply = false) {
-    const cfg = getSyncConfig();
-    if (!cfg.token || !cfg.gistId) return { ok: false, updated: false };
-
-    try {
-      const res = await fetch(`https://api.github.com/gists/${encodeURIComponent(cfg.gistId)}`, {
-        cache: 'no-store',
-        headers: {
-          'Authorization': `token ${cfg.token}`,
-          'Accept': 'application/vnd.github+json'
-        }
-      });
-
-      if (!res.ok) {
-        const msg = `GitHub API error (${res.status})`;
-        syncStatus = { state: 'error', lastSyncedAt: syncStatus.lastSyncedAt, lastError: msg };
-        return { ok: false, updated: false, error: msg };
-      }
-
-      const json = await res.json();
-      const fileObj = json.files && json.files[GIST_FILENAME];
-      if (!fileObj || !fileObj.content) {
-        return { ok: true, updated: false, remoteData: null };
-      }
-
-      const remoteData = JSON.parse(fileObj.content);
-      const remoteTs = Number(remoteData.updatedAt) || 0;
-      const localTs = Number(data.updatedAt) || 0;
-
-      if (forceApply) {
-        replaceData(remoteData, false);
-        applySyncedPreferences();
-        syncStatus = { state: 'ok', lastSyncedAt: Date.now(), lastError: '' };
-        return { ok: true, updated: true, remoteData };
-      }
-
-      if (remoteTs !== localTs) {
-        const merged = mergeData(data, remoteData);
-        const shouldPushBack = pendingPush || localTs > remoteTs;
-        replaceData(merged, false);
-        applySyncedPreferences();
-        syncStatus = { state: 'ok', lastSyncedAt: Date.now(), lastError: '' };
-        return { ok: true, updated: remoteTs > localTs, needsPush: shouldPushBack, remoteData };
-      }
-
-      syncStatus = { state: 'ok', lastSyncedAt: Date.now(), lastError: '' };
-      return { ok: true, updated: false, remoteData };
-    } catch (e) {
-      syncStatus = { state: 'error', lastSyncedAt: syncStatus.lastSyncedAt, lastError: 'Offline' };
-      return { ok: false, updated: false, error: 'Offline' };
-    }
+    return { ok: false, error: 'Not connected' };
   }
 
   function applySyncedPreferences() {
@@ -430,6 +286,7 @@ window.AppState = (function () {
     }
   }
 
+
   function load() {
     try {
       const raw = localStorage.getItem(C.STORAGE_KEY);
@@ -448,7 +305,8 @@ window.AppState = (function () {
           books: Array.isArray(parsed.books) ? parsed.books : [],
           tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
           habits: Array.isArray(parsed.habits) ? parsed.habits : def.habits,
-          reviews: parsed.reviews || {}
+          reviews: parsed.reviews || {},
+          resolvedPenalties: parsed.resolvedPenalties || {}
         };
       } else {
         data = createDefaultState();
@@ -534,7 +392,8 @@ window.AppState = (function () {
       books: Array.isArray(newData.books) ? newData.books : [],
       tasks: Array.isArray(newData.tasks) ? newData.tasks : [],
       habits: Array.isArray(newData.habits) ? newData.habits : [],
-      reviews: newData.reviews || {}
+      reviews: newData.reviews || {},
+      resolvedPenalties: newData.resolvedPenalties || {}
     };
     markLedgerDirty();
     save(triggerSync);
@@ -708,9 +567,7 @@ window.AppState = (function () {
     setSyncConfig,
     clearSyncConfig,
     getSyncStatus,
-    pushToGist,
-    pullFromGist,
-    syncNow,
+            syncNow,
     initThemeAndTelegram,
     applyTheme,
     toggleTheme,
