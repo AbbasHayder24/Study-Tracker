@@ -139,6 +139,16 @@ window.SettingsModule = (function () {
                   <button id="setting-google-sync-now" type="button" class="py-2 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">${isAr() ? '🔄 مزامنة الآن' : '🔄 Sync Now'}</button>
                   <button id="setting-google-signout" type="button" class="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">${isAr() ? 'تسجيل الخروج' : 'Sign Out'}</button>
                 </div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  ${window.GoogleSync && window.GoogleSync.getLocalPreSyncBackup && window.GoogleSync.getLocalPreSyncBackup() ? `
+                    <button id="setting-restore-local-bak" type="button" class="py-2 px-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+                      ${isAr() ? '⏪ نسخة قبل المزامنة' : '⏪ Pre-Sync Backup'}
+                    </button>
+                  ` : ''}
+                  <button id="setting-restore-cloud-bak" type="button" class="py-2 px-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold ${window.GoogleSync && window.GoogleSync.getLocalPreSyncBackup && window.GoogleSync.getLocalPreSyncBackup() ? '' : 'col-span-2'}">
+                    ${isAr() ? '☁️ استعادة النسخة السحابية السابقة' : '☁️ Restore Cloud Backup'}
+                  </button>
+                </div>
               `;
             }
             return `
@@ -299,6 +309,36 @@ window.SettingsModule = (function () {
       gSignOutBtn.onclick = async () => {
         await window.GoogleSync.signOut();
         rerender();
+      };
+    }
+    const localBakBtn = document.getElementById('setting-restore-local-bak');
+    if (localBakBtn && window.GoogleSync) {
+      localBakBtn.onclick = () => {
+        window.AppUI.confirmAction({
+          title: isAr() ? 'استعادة نسخة ما قبل المزامنة' : 'Restore Pre-Sync Backup',
+          message: isAr() ? 'سيتم استرجاع بياناتك المحلية المحفوظة قبل آخر مزامنة. هل تريد المتابعة؟' : 'Restore your local data snapshot saved before the last sync?',
+          confirmText: isAr() ? 'استعادة' : 'Restore',
+          onConfirm: async () => {
+            const res = await window.GoogleSync.restoreLocalPreSyncBackup();
+            window.AppUI.showToast(res.ok ? (isAr() ? 'تمت الاستعادة بنجاح ⏪' : 'Backup restored ⏪') : (res.error || 'Error'), res.ok ? 'success' : 'warning');
+            if (res.ok) rerender();
+          }
+        });
+      };
+    }
+    const cloudBakBtn = document.getElementById('setting-restore-cloud-bak');
+    if (cloudBakBtn && window.GoogleSync) {
+      cloudBakBtn.onclick = () => {
+        window.AppUI.confirmAction({
+          title: isAr() ? 'استعادة النسخة السحابية السابقة' : 'Restore Previous Cloud Backup',
+          message: isAr() ? 'سيتم سحب النسخة الاحتياطية التلقائية السابقة من السحابة واستبدال البيانات الحالية. هل تريد المتابعة؟' : 'Pull the automatic previous backup from Firestore and restore it?',
+          confirmText: isAr() ? 'استعادة' : 'Restore',
+          onConfirm: async () => {
+            const res = await window.GoogleSync.restoreCloudBackup();
+            window.AppUI.showToast(res.ok ? (isAr() ? 'تمت استعادة النسخة السحابية ☁️' : 'Cloud backup restored ☁️') : (res.error || 'Error'), res.ok ? 'success' : 'warning');
+            if (res.ok) rerender();
+          }
+        });
       };
     }
 

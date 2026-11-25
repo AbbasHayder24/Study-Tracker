@@ -30,6 +30,7 @@ window.GoogleSync = (function () {
   let queuedSync = false;
   let queuedSilent = true;
   let pushDebounce = null;
+  const PRE_SYNC_BACKUP_KEY = 'study_tracker_pre_sync_backup_v1';
   let signingIn = false;
 
   function isAr() {
@@ -184,12 +185,75 @@ window.GoogleSync = (function () {
     }
   }
 
-  async function writeCloudPayload(payload) {
-    await db.collection('users').doc(currentUser.uid).set({
+  function countStudyWeight(obj) {
+    if (!obj || typeof obj !== 'object') return 0;
+    const books = Array.isArray(obj.books) ? obj.books.length : 0;
+    const logs = obj.dailyLogs ? Object.keys(obj.dailyLogs).filter(k => (Number(obj.dailyLogs[k] && obj.dailyLogs[k].hours) || 0) > 0).length : 0;
+    const revs = obj.reviews ? Object.keys(obj.reviews).length : 0;
+    return books + logs + revs;
+  }
+
+  function saveLocalPreSyncBackup(dataObj) {
+    if (countStudyWeight(dataObj) <= 0) return;
+    try {
+      localStorage.setItem(PRE_SYNC_BACKUP_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        data: dataObj
+      }));
+    } catch (e) {}
+  }
+
+  function getLocalPreSyncBackup() {
+    try {
+      const raw = localStorage.getItem(PRE_SYNC_BACKUP_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.data && countStudyWeight(parsed.data) > 0) return parsed;
+    } catch (e) {}
+    return null;
+  }
+
+  async function restoreLocalPreSyncBackup() {
+    const bak = getLocalPreSyncBackup();
+    if (!bak || !bak.data) return { ok: false, error: isAr() ? 'لا توجد نسخة احتياطية محلية قبل المزامنة' : 'No local pre-sync backup found' };
+    window.AppState.replaceData(bak.data, true, true);
+    if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
+    return { ok: true };
+  }
+
+  async function restoreCloudBackup() {
+    try {
+      await ensureInit();
+      if (!currentUser || !db) return { ok: false, error: isAr() ? 'سجّل الدخول بحساب Google أولاً' : 'Sign in with Google first' };
+      const snap = await db.collection('users').doc(currentUser.uid).get();
+      if (!snap.exists) return { ok: false, error: isAr() ? 'لا توجد نسخة سحابية محفوظة' : 'No cloud backup found' };
+      const doc = snap.data() || {};
+      const bak = doc.lastBackup && doc.lastBackup.payload;
+      if (!bak || countStudyWeight(bak) <= 0) {
+        return { ok: false, error: isAr() ? 'لا توجد نسخة سحابية سابقة تحتوي على بيانات' : 'No previous cloud backup with study data found' };
+      }
+      saveLocalPreSyncBackup(window.AppState.getData());
+      window.AppState.replaceData(bak, true, true);
+      if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
+      return { ok: true, savedAt: doc.lastBackup.savedAt || 0 };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) ? e.message : 'Restore failed' };
+    }
+  }
+
+  async function writeCloudPayload(payload, prevRemoteData = null) {
+    const docUpdate = {
       payload,
       updatedAt: payload.updatedAt,
       email: currentUser.email || ''
-    }, { merge: true });
+    };
+    if (prevRemoteData && countStudyWeight(prevRemoteData) > 0) {
+      docUpdate.lastBackup = {
+        savedAt: Date.now(),
+        payload: prevRemoteData
+      };
+    }
+    await db.collection('users').doc(currentUser.uid).set(docUpdate, { merge: true });
   }
 
   async function syncNow(silent = false) {
@@ -222,14 +286,19 @@ window.GoogleSync = (function () {
       let merged = localData;
       let remoteExists = false;
       let remoteSnap = '';
+      let remoteDataObj = null;
+      const explicitReset = !!(typeof window !== 'undefined' && window.__studyTrackerExplicitReset);
 
       if (snap.exists) {
         const remoteDoc = snap.data() || {};
         const remoteData = remoteDoc.payload;
         if (remoteData && typeof remoteData === 'object') {
           remoteExists = true;
+          remoteDataObj = remoteData;
           remoteSnap = stableSnapshot(remoteData);
-          if (typeof window.AppState.mergeData === 'function') {
+          if (explicitReset) {
+            merged = localData;
+          } else if (typeof window.AppState.mergeData === 'function') {
             merged = window.AppState.mergeData(localData, remoteData);
           } else {
             const localTs = Number(localData.updatedAt) || 0;
@@ -239,21 +308,36 @@ window.GoogleSync = (function () {
         }
       }
 
+      // Layer 1: Anti-Wipe Guard — never let an empty state overwrite non-empty study data unless explicitly reset
+      const localWeight = countStudyWeight(localData);
+      const remoteWeight = countStudyWeight(remoteDataObj);
+      let mergedWeight = countStudyWeight(merged);
+      if (!explicitReset && mergedWeight === 0 && (remoteWeight > 0 || localWeight > 0)) {
+        merged = remoteWeight >= localWeight ? remoteDataObj : localData;
+        mergedWeight = countStudyWeight(merged);
+      }
+
       const mergedSnap = stableSnapshot(merged);
       const localChanged = mergedSnap !== localSnap;
       const remoteChanged = !remoteExists || mergedSnap !== remoteSnap || pendingPush;
 
       if (localChanged) {
+        // Layer 2: Save automatic local pre-sync snapshot before modifying local state
+        saveLocalPreSyncBackup(localData);
         window.AppState.replaceData(merged, false, true);
       }
 
       if (remoteChanged) {
         const payload = JSON.parse(JSON.stringify(window.AppState.getData()));
-        payload.updatedAt = Math.max(Number(payload.updatedAt) || 0, Date.now());
-        // Keep local updatedAt aligned without re-triggering sync
-        window.AppState.getData().updatedAt = payload.updatedAt;
-        window.AppState.save(false, true);
-        await writeCloudPayload(payload);
+        const payloadWeight = countStudyWeight(payload);
+        // Final cloud Anti-Wipe Guard
+        if (explicitReset || payloadWeight > 0 || remoteWeight === 0) {
+          payload.updatedAt = Math.max(Number(payload.updatedAt) || 0, Date.now());
+          window.AppState.getData().updatedAt = payload.updatedAt;
+          window.AppState.save(false, true);
+          await writeCloudPayload(payload, remoteDataObj);
+          if (explicitReset && typeof window !== 'undefined') window.__studyTrackerExplicitReset = false;
+        }
       }
 
       pendingPush = false;
@@ -445,6 +529,9 @@ window.GoogleSync = (function () {
     syncNow,
     onLocalSave,
     ensureReadyAndSync,
-    ensureReady
+    ensureReady,
+    getLocalPreSyncBackup,
+    restoreLocalPreSyncBackup,
+    restoreCloudBackup
   };
 })();

@@ -399,6 +399,7 @@ window.AppState = (function () {
   }
 
   function resetAll() {
+    if (typeof window !== 'undefined') window.__studyTrackerExplicitReset = true;
     const allIds = [
       ...(data.books || []).map(b => b.id),
       ...(data.tasks || []).map(t => t.id),
