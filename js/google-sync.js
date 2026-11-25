@@ -241,19 +241,22 @@ window.GoogleSync = (function () {
     }
   }
 
-  async function writeCloudPayload(payload, prevRemoteData = null) {
-    const docUpdate = {
+  async function writeCloudPayload(payload, prevRemoteData = null, prevBackup = null) {
+    const docData = {
       payload,
       updatedAt: payload.updatedAt,
       email: currentUser.email || ''
     };
     if (prevRemoteData && countStudyWeight(prevRemoteData) > 0) {
-      docUpdate.lastBackup = {
+      docData.lastBackup = {
         savedAt: Date.now(),
         payload: prevRemoteData
       };
+    } else if (prevBackup) {
+      docData.lastBackup = prevBackup;
     }
-    await db.collection('users').doc(currentUser.uid).set(docUpdate, { merge: true });
+    // Atomic write (no deep-merge into payload) so old deleted keys never corrupt payload
+    await db.collection('users').doc(currentUser.uid).set(docData);
   }
 
   async function syncNow(silent = false) {
@@ -279,38 +282,63 @@ window.GoogleSync = (function () {
       }
 
       const docRef = db.collection('users').doc(currentUser.uid);
-      const snap = await docRef.get();
+      // Always prefer live server read so a new device never sees a stale/empty cache
+      const snap = await docRef.get({ source: 'server' }).catch(() => docRef.get());
       const localData = window.AppState.getData();
       const localSnap = stableSnapshot(localData);
+      const localWeight = countStudyWeight(localData);
 
       let merged = localData;
       let remoteExists = false;
       let remoteSnap = '';
       let remoteDataObj = null;
+      let prevCloudBackup = null;
       const explicitReset = !!(typeof window !== 'undefined' && window.__studyTrackerExplicitReset);
 
       if (snap.exists) {
         const remoteDoc = snap.data() || {};
+        prevCloudBackup = remoteDoc.lastBackup || null;
         const remoteData = remoteDoc.payload;
         if (remoteData && typeof remoteData === 'object') {
           remoteExists = true;
           remoteDataObj = remoteData;
           remoteSnap = stableSnapshot(remoteData);
-          if (explicitReset) {
-            merged = localData;
-          } else if (typeof window.AppState.mergeData === 'function') {
-            merged = window.AppState.mergeData(localData, remoteData);
-          } else {
-            const localTs = Number(localData.updatedAt) || 0;
-            const remoteTs = Number(remoteDoc.updatedAt || remoteData.updatedAt) || 0;
-            merged = remoteTs > localTs ? remoteData : localData;
-          }
+        }
+      }
+
+      const remoteWeight = countStudyWeight(remoteDataObj);
+
+      // STRICT READ-ONLY PULL: If this device has NO study data and cloud HAS data,
+      // pull cloud directly and DO NOT write anything back to Firestore!
+      if (!explicitReset && localWeight === 0 && remoteWeight > 0) {
+        window.AppState.replaceData(remoteDataObj, false, true);
+        pendingPush = false;
+        updateStatus({ state: 'ok', lastSyncedAt: Date.now(), lastError: '' });
+        if (window.GroupsModule && window.GroupsModule.syncMyPresence) {
+          window.GroupsModule.syncMyPresence(false);
+        }
+        if (!silent && window.AppUI) {
+          window.AppUI.showToast(
+            isAr() ? 'تم سحب جميع بياناتك من حساب Google بأمان ☁️' : 'Pulled all your data safely from Google ☁️',
+            'success'
+          );
+        }
+        return { ok: true, updated: true };
+      }
+
+      if (remoteExists) {
+        if (explicitReset) {
+          merged = localData;
+        } else if (typeof window.AppState.mergeData === 'function') {
+          merged = window.AppState.mergeData(localData, remoteDataObj);
+        } else {
+          const localTs = Number(localData.updatedAt) || 0;
+          const remoteTs = Number(remoteDataObj.updatedAt) || 0;
+          merged = remoteTs > localTs ? remoteDataObj : localData;
         }
       }
 
       // Layer 1: Anti-Wipe Guard — never let an empty state overwrite non-empty study data unless explicitly reset
-      const localWeight = countStudyWeight(localData);
-      const remoteWeight = countStudyWeight(remoteDataObj);
       let mergedWeight = countStudyWeight(merged);
       if (!explicitReset && mergedWeight === 0 && (remoteWeight > 0 || localWeight > 0)) {
         merged = remoteWeight >= localWeight ? remoteDataObj : localData;
@@ -322,7 +350,6 @@ window.GoogleSync = (function () {
       const remoteChanged = !remoteExists || mergedSnap !== remoteSnap || pendingPush;
 
       if (localChanged) {
-        // Layer 2: Save automatic local pre-sync snapshot before modifying local state
         saveLocalPreSyncBackup(localData);
         window.AppState.replaceData(merged, false, true);
       }
@@ -330,12 +357,12 @@ window.GoogleSync = (function () {
       if (remoteChanged) {
         const payload = JSON.parse(JSON.stringify(window.AppState.getData()));
         const payloadWeight = countStudyWeight(payload);
-        // Final cloud Anti-Wipe Guard
+        // Never overwrite non-empty cloud with empty payload unless explicitReset
         if (explicitReset || payloadWeight > 0 || remoteWeight === 0) {
           payload.updatedAt = Math.max(Number(payload.updatedAt) || 0, Date.now());
           window.AppState.getData().updatedAt = payload.updatedAt;
           window.AppState.save(false, true);
-          await writeCloudPayload(payload, remoteDataObj);
+          await writeCloudPayload(payload, remoteDataObj, prevCloudBackup);
           if (explicitReset && typeof window !== 'undefined') window.__studyTrackerExplicitReset = false;
         }
       }

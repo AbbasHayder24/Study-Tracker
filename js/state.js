@@ -152,10 +152,13 @@ window.AppState = (function () {
     const primary = localNewer ? local : remote;
     const secondary = localNewer ? remote : local;
 
-    const deletedSet = new Set([
-      ...(Array.isArray(local.deletedIds) ? local.deletedIds : []),
-      ...(Array.isArray(remote.deletedIds) ? remote.deletedIds : [])
-    ]);
+    // If local device has NO study data while remote DOES, ignore local.deletedIds so a reset/empty phone never wipes cloud items
+    const deletedSet = (!localHasData && remoteHasData)
+      ? new Set(Array.isArray(remote.deletedIds) ? remote.deletedIds : [])
+      : new Set([
+          ...(Array.isArray(local.deletedIds) ? local.deletedIds : []),
+          ...(Array.isArray(remote.deletedIds) ? remote.deletedIds : [])
+        ]);
 
     const mergeById = (secArr, priArr) => {
       const map = new Map();
