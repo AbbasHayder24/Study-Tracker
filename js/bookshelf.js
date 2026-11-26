@@ -310,34 +310,30 @@ window.BookshelfModule = (function () {
       `;
 
     const outHtml = `
-      <div id="bookshelf-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <div class="flex items-center gap-1.5">
-              <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">${t('bookshelfTitle', { n: completedCount })}</h3>
-              ${window.AppUI.infoButtonHtml('info-shelf-btn')}
-            </div>
-            <p class="text-xs text-slate-500 dark:text-slate-400">${t('hrsCompleted', { h: window.AppUI.formatHours(totalMinutes / 60) })}</p>
+      <div id="bookshelf-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200/70 dark:border-slate-700/70">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <div class="min-w-0">
+            <h3 class="text-sm font-extrabold text-slate-800 dark:text-slate-100 truncate">${t('bookshelfTitle', { n: completedCount })}</h3>
+            <p class="text-[11px] text-slate-400">${t('hrsCompleted', { h: window.AppUI.formatHours(totalMinutes / 60) })}</p>
           </div>
-          <div class="flex items-center gap-1.5">
-            <button id="shelf-style-toggle" type="button" title="${window.AppUI.escapeHtml(t('shelfStyleToggleTitle'))}" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-              ${style === 'minimal' ? t('shelfStyleMinimal') : t('shelfStyleClassic')}
-            </button>
-            ${multiSelectMode && books.length > 0 ? `
-              <button id="shelf-select-all" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                ${selectedIds.size === books.length ? t('none') : t('all')}
+          <div class="flex items-center gap-1.5 shrink-0">
+            ${multiSelectMode ? `
+              ${books.length > 0 ? `
+                <button id="shelf-select-all" type="button" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                  ${selectedIds.size === books.length ? t('none') : t('all')}
+                </button>
+              ` : ''}
+              ${selectedIds.size > 0 ? `
+                <button id="shelf-delete-selected" type="button" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-rose-600 text-white">
+                  ${t('deleteSelectedCount', { n: selectedIds.size })}
+                </button>
+              ` : ''}
+              <button id="shelf-toggle-select" type="button" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-600 text-white">
+                ${t('cancel')}
               </button>
-            ` : ''}
-            ${multiSelectMode && selectedIds.size > 0 ? `
-              <button id="shelf-delete-selected" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-rose-600 text-white hover:bg-rose-700">
-                ${t('deleteSelectedCount', { n: selectedIds.size })}
-              </button>
-            ` : ''}
-            ${books.length > 0 ? `
-              <button id="shelf-toggle-select" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-medium ${multiSelectMode ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
-                ${multiSelectMode ? t('cancel') : t('select')}
-              </button>
-            ` : ''}
+            ` : `
+              <button id="shelf-more-menu" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 flex items-center justify-center text-sm font-extrabold" title="${isArShelf ? 'خيارات الرف' : 'Shelf Options'}">⋯</button>
+            `}
           </div>
         </div>
 
@@ -377,6 +373,54 @@ window.BookshelfModule = (function () {
         }
       };
     });
+
+
+    const shelfMoreMenu = document.getElementById('shelf-more-menu');
+    if (shelfMoreMenu) {
+      shelfMoreMenu.onclick = () => {
+        const ar = !!(window.I18n && window.I18n.isRTL());
+        const curStyle = getShelfStyle();
+        window.AppUI.openModal({
+          title: ar ? '📚 خيارات الرف' : '📚 Bookshelf Options',
+          bodyHtml: `
+            <div class="space-y-2">
+              <button id="shelf-opt-style" type="button" class="w-full py-3 px-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between">
+                <span>${ar ? '🎨 شكل الكتب على الرف' : '🎨 Bookshelf Style'}</span>
+                <span class="text-indigo-600 dark:text-indigo-400">${curStyle === 'minimal' ? t('shelfStyleMinimal') : t('shelfStyleClassic')}</span>
+              </button>
+              <button id="shelf-opt-select" type="button" class="w-full py-3 px-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between">
+                <span>${ar ? '☑️ تحديد متعدد للحذف' : '☑️ Multi-Select to Delete'}</span>
+                <span class="text-slate-400">›</span>
+              </button>
+            </div>
+          `,
+          footerHtml: `<button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إغلاق' : 'Close'}</button>`
+        });
+        const optStyle = document.getElementById('shelf-opt-style');
+        if (optStyle) {
+          optStyle.onclick = () => {
+            const next = getShelfStyle() === 'minimal' ? 'classic' : 'minimal';
+            const d = window.AppState.getData();
+            if (!d.settings) d.settings = {};
+            d.settings.bookshelfStyle = next;
+            window.AppState.save(true);
+            cachedShelfKey = '';
+            window.AppUI.closeModal();
+            if (onChanged) onChanged();
+          };
+        }
+        const optSel = document.getElementById('shelf-opt-select');
+        if (optSel) {
+          optSel.onclick = () => {
+            multiSelectMode = true;
+            selectedIds.clear();
+            cachedShelfKey = '';
+            window.AppUI.closeModal();
+            if (onChanged) onChanged();
+          };
+        }
+      };
+    }
 
     const moreBtn = document.getElementById('shelf-load-more');
     if (moreBtn) {
@@ -563,7 +607,7 @@ window.BookshelfModule = (function () {
         </div>
       `,
       footerHtml: `
-        <button id="edit-book-delete" class="px-3 py-2 rounded-xl text-sm font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 hover:bg-rose-200 mr-auto">${t('delete')}</button>
+        <button id="edit-book-delete" class="px-3 py-2 rounded-xl text-sm font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 hover:bg-rose-200 me-auto">${t('delete')}</button>
         <button id="edit-book-cancel" class="px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">${t('cancel')}</button>
         <button id="edit-book-save" class="px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700">${t('save')}</button>
       `

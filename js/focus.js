@@ -637,129 +637,107 @@ window.FocusModule = (function () {
       ? (isAr() ? `متوقف مؤقتاً • متبقي ${formatMMSS(getPauseRemainingSec())}` : `Paused • ${formatMMSS(getPauseRemainingSec())} left`)
       : (mode === 'pomodoro' ? formatDurationLabel(targetMinutes) : t('countingUp'));
 
+    const curTagObj = (data.tags || []).find(tg => tg.id === selectedTagId) || (data.tags || [])[0] || null;
+    const curSubjObj = (data.subjects || []).find(s => s.id === selectedSubjectId) || null;
+    const pillColor = (curSubjObj && curSubjObj.color) || (curTagObj && curTagObj.color) || activeColor;
+    const pillLabel = curSubjObj
+      ? curSubjObj.name
+      : (curTagObj ? curTagObj.name : (isAr() ? 'اختر المادة' : 'Choose Subject'));
+
     return `
-      <div class="space-y-4">
-        ${(() => {
-          const liveN = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0;
-          if (liveN <= 0) return '';
-          return `
-            <button id="focus-ambient-hall" type="button" class="w-full py-1.5 px-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-900/30 border border-emerald-200/60 dark:border-emerald-800/50 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1.5">
-              <span>🟢</span>
-              <span>${isAr() ? `${liveN} من زملائك يدرسون الآن في القاعة` : `${liveN} studying live in Study Hall`}</span>
-            </button>
-          `;
-        })()}
-        <div id="focus-timer-card" class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div class="zen-hide flex items-center justify-between mb-3">
-            <div class="flex items-center gap-1.5">
-              <h2 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('focusSession')}</h2>
-              ${window.AppUI.infoButtonHtml('info-focus-btn')}
-            </div>
-            <div class="flex items-center gap-1.5">
-              <button id="focus-zen-btn" type="button" class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 text-[11px] font-bold" title="${isAr() ? 'وضع التركيز الكامل (Zen Mode)' : 'Zen Focus Mode'}">
-                🧘 Zen
-              </button>
-              ${mode === 'pomodoro' ? `
-                <button id="focus-quick-test" ${isRunning ? 'disabled' : ''} class="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[11px] font-medium">
-                  ${t('quickTest')}
-                </button>
-              ` : ''}
-            </div>
-          </div>
-
-          <button id="focus-zen-exit" type="button" class="zen-only px-3.5 py-2 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-lg">
-            ✕ ${isAr() ? 'خروج من Zen' : 'Exit Zen'}
-          </button>
-
-          <div class="zen-hide flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl mb-4">
-            <button id="mode-pomodoro" ${isRunning ? 'disabled' : ''} class="flex-1 py-2 rounded-lg text-xs font-bold transition ${mode === 'pomodoro' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
-              ${t('pomodoro')}
-            </button>
-            <button id="mode-stopwatch" ${isRunning ? 'disabled' : ''} class="flex-1 py-2 rounded-lg text-xs font-bold transition ${mode === 'stopwatch' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
-              ${t('stopwatch')}
-            </button>
-          </div>
-
-          <div id="focus-dial-container" class="relative w-48 h-48 mx-auto my-2 flex items-center justify-center" style="${mode === 'pomodoro' && !isRunning ? 'touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;' : ''}">
-            <svg id="focus-dial-svg" class="w-48 h-48" viewBox="0 0 192 192" style="overflow:visible">
-              <circle cx="96" cy="96" r="84" fill="none" stroke="currentColor" stroke-width="8" class="text-slate-100 dark:text-slate-700"/>
-              ${mode === 'pomodoro' && !isRunning ? [0, 60, 120, 180, 240, 300].map(deg => {
-                const rad = (deg - 90) * Math.PI / 180;
-                const x1 = (96 + 74 * Math.cos(rad)).toFixed(1);
-                const y1 = (96 + 74 * Math.sin(rad)).toFixed(1);
-                const x2 = (96 + 78 * Math.cos(rad)).toFixed(1);
-                const y2 = (96 + 78 * Math.sin(rad)).toFixed(1);
-                return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.35" class="text-slate-400 dark:text-slate-400"/>`;
-              }).join('') : ''}
-              <circle id="focus-progress-ring" cx="96" cy="96" r="84" fill="none" stroke="${activeColor}" stroke-width="8" stroke-linecap="round"
-                transform="rotate(-90 96 96)"
-                stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}"/>
-              ${mode === 'pomodoro' && !isRunning ? `
-                <circle id="focus-dial-knob" cx="${knobPos.x.toFixed(2)}" cy="${knobPos.y.toFixed(2)}" r="9"
-                  fill="#ffffff" stroke="${activeColor}" stroke-width="3"
-                  style="cursor:grab"/>
-              ` : ''}
-            </svg>
-            <div class="absolute inset-0 flex flex-col items-center justify-center" style="pointer-events:none">
-              <button id="focus-clock-btn" type="button" style="pointer-events:${mode === 'pomodoro' && !isRunning ? 'auto' : 'none'}" title="${isAr() ? 'اضغط لضبط الوقت بدقة' : 'Tap to set exact time'}">
-                <span id="focus-clock-text" dir="ltr" class="font-extrabold tracking-wider text-slate-800 dark:text-white font-mono" style="font-size:${displaySec >= 3600 ? '1.5rem' : '1.875rem'};line-height:1.15">${formatMMSS(displaySec)}</span>
-              </button>
-              <span id="focus-status-sub" class="text-[11px] mt-1 font-medium ${isPaused ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-500 dark:text-slate-400'}">
-                ${statusSub}
-              </span>
-            </div>
-          </div>
-
-          ${mode === 'pomodoro' ? `
-            <div class="flex items-center justify-center mt-2 mb-4">
-              <button id="focus-end-time-pill" type="button" ${isRunning ? 'disabled' : ''}
-                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:opacity-80">
-                <span>⏰</span>
-                <span id="focus-end-time-label">${isAr() ? 'ينتهي' : 'Ends'} ${formatEndClock(isRunning ? Math.ceil(displaySec / 60) : targetMinutes)}</span>
-                ${!isRunning ? `<span class="opacity-60 text-[10px]">✎</span>` : ''}
-              </button>
-            </div>
-          ` : ''}
-
+      <div class="focus-ipad-grid">
+        <div class="space-y-3">
           ${(() => {
-            linkType = 'subject';
-            selectedTaskId = '';
-            const linkedSubjects = (data.subjects || []).filter(s => s.defaultTagId === selectedTagId);
-            const subjList = linkedSubjects.length ? linkedSubjects : (data.subjects || []);
+            const liveN = window.GroupsModule ? window.GroupsModule.getLiveStudyingCount() : 0;
+            if (liveN <= 0) return '';
             return `
-          <div class="zen-hide grid grid-cols-1 ${subjList.length ? 'sm:grid-cols-2' : ''} gap-2.5 mb-4 items-end">
-            <div>
-              <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">${t('tagLabel')}</label>
-              <select id="focus-tag-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
-                ${data.tags.map(tg => `<option value="${window.AppUI.escapeHtml(tg.id)}" ${tg.id === selectedTagId ? 'selected' : ''}>${window.AppUI.escapeHtml(tg.name)}</option>`).join('')}
-              </select>
-            </div>
-            ${subjList.length ? `
-            <div>
-              <label class="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">${t('subjectLabel')}</label>
-              <select id="focus-subject-select" ${isRunning ? 'disabled' : ''} class="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-medium">
-                <option value="">${window.AppUI.escapeHtml(t('noSubject'))}</option>
-                ${subjList.map(s => `<option value="${window.AppUI.escapeHtml(s.id)}" ${s.id === selectedSubjectId ? 'selected' : ''}>${window.AppUI.escapeHtml(s.name)}</option>`).join('')}
-              </select>
-            </div>
-            ` : ''}
-          </div>
+              <button id="focus-ambient-hall" type="button" class="zen-hide w-full py-1.5 px-3 rounded-full bg-emerald-50/70 dark:bg-emerald-900/30 border border-emerald-200/60 dark:border-emerald-800/50 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1.5">
+                <span>🟢</span>
+                <span>${isAr() ? `${liveN} من زملائك يدرسون الآن في القاعة` : `${liveN} studying live in Study Hall`}</span>
+              </button>
             `;
           })()}
 
-          <div class="flex gap-2">
-            ${!isRunning ? `
-              <button id="focus-start-btn" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition">
-                ${t('startFocus')}
+          <div id="focus-timer-card" class="focus-hero-stage">
+            <div class="zen-hide flex items-center justify-between mb-3">
+              <div class="${isRunning ? 'opacity-0 pointer-events-none' : ''} flex p-0.5 bg-slate-100/90 dark:bg-slate-800/80 rounded-full border border-slate-200/60 dark:border-slate-700/70">
+                <button id="mode-pomodoro" ${isRunning ? 'disabled' : ''} class="px-3.5 py-1.5 rounded-full text-[11px] font-bold transition ${mode === 'pomodoro' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
+                  ${t('pomodoro')}
+                </button>
+                <button id="mode-stopwatch" ${isRunning ? 'disabled' : ''} class="px-3.5 py-1.5 rounded-full text-[11px] font-bold transition ${mode === 'stopwatch' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}">
+                  ${t('stopwatch')}
+                </button>
+              </div>
+              <button id="focus-zen-btn" type="button" class="px-2.5 py-1.5 rounded-full bg-slate-100/90 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-[11px] font-bold hover:opacity-85" title="${isAr() ? 'وضع التركيز الكامل (Zen Mode)' : 'Zen Focus Mode'}">
+                🧘 Zen
               </button>
-            ` : `
-              <button id="focus-pause-btn" class="flex-1 py-3 rounded-xl bg-amber-500 text-white font-bold text-sm shadow-sm transition">
-                ${isPaused ? t('resume') : t('pause')}
+            </div>
+
+            <button id="focus-zen-exit" type="button" class="zen-only px-3.5 py-2 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-lg">
+              ✕ ${isAr() ? 'خروج من Zen' : 'Exit Zen'}
+            </button>
+
+            <div id="focus-dial-container" class="focus-dial-lg relative mx-auto my-2 flex items-center justify-center" style="${mode === 'pomodoro' && !isRunning ? 'touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;' : ''}">
+              <svg id="focus-dial-svg" class="w-full h-full" viewBox="0 0 192 192" style="overflow:visible">
+                <circle cx="96" cy="96" r="84" fill="none" stroke="currentColor" stroke-width="7.5" class="text-slate-200/80 dark:text-slate-700"/>
+                ${mode === 'pomodoro' && !isRunning ? [0, 60, 120, 180, 240, 300].map(deg => {
+                  const rad = (deg - 90) * Math.PI / 180;
+                  const x1 = (96 + 74 * Math.cos(rad)).toFixed(1);
+                  const y1 = (96 + 74 * Math.sin(rad)).toFixed(1);
+                  const x2 = (96 + 78 * Math.cos(rad)).toFixed(1);
+                  const y2 = (96 + 78 * Math.sin(rad)).toFixed(1);
+                  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.35" class="text-slate-400 dark:text-slate-400"/>`;
+                }).join('') : ''}
+                <circle id="focus-progress-ring" cx="96" cy="96" r="84" fill="none" stroke="${activeColor}" stroke-width="8" stroke-linecap="round"
+                  transform="rotate(-90 96 96)"
+                  stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}"/>
+                ${mode === 'pomodoro' && !isRunning ? `
+                  <circle id="focus-dial-knob" cx="${knobPos.x.toFixed(2)}" cy="${knobPos.y.toFixed(2)}" r="9.5"
+                    fill="#ffffff" stroke="${activeColor}" stroke-width="3"
+                    style="cursor:grab"/>
+                ` : ''}
+              </svg>
+              <div class="absolute inset-0 flex flex-col items-center justify-center" style="pointer-events:none">
+                <button id="focus-clock-btn" type="button" style="pointer-events:${mode === 'pomodoro' && !isRunning ? 'auto' : 'none'}" title="${isAr() ? 'اضغط لضبط الوقت بدقة' : 'Tap to set exact time'}">
+                  <span id="focus-clock-text" dir="ltr" class="font-extrabold tracking-wide text-slate-800 dark:text-white tabular-nums" style="font-size:${displaySec >= 3600 ? '1.85rem' : '2.35rem'};line-height:1.1">${formatMMSS(displaySec)}</span>
+                </button>
+                <span id="focus-status-sub" class="text-xs mt-1.5 font-medium ${isPaused ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-500 dark:text-slate-400'}">
+                  ${statusSub}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-center gap-2 mt-2 mb-5">
+              ${mode === 'pomodoro' ? `
+                <button id="focus-end-time-pill" type="button" ${isRunning ? 'disabled' : ''}
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/90 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:opacity-80">
+                  <span>⏰</span>
+                  <span id="focus-end-time-label">${isAr() ? 'ينتهي' : 'Ends'} ${formatEndClock(isRunning ? Math.ceil(displaySec / 60) : targetMinutes)}</span>
+                  ${!isRunning ? `<span class="opacity-60 text-[10px]">✎</span>` : ''}
+                </button>
+              ` : ''}
+              <button id="focus-picker-pill" type="button" ${isRunning ? 'disabled' : ''}
+                class="zen-hide inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm hover:opacity-85">
+                <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(pillColor)}"></span>
+                <span class="truncate max-w-[160px]">${window.AppUI.escapeHtml(pillLabel)}</span>
+                ${!isRunning ? `<span class="text-[10px] opacity-60">▾</span>` : ''}
               </button>
-              <button id="focus-stop-btn" class="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-sm transition">
-                ${mode === 'stopwatch' ? t('finish') : t('stop')}
-              </button>
-            `}
+            </div>
+
+            <div class="flex gap-2.5 max-w-xs mx-auto">
+              ${!isRunning ? `
+                <button id="focus-start-btn" class="flex-1 py-3.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm shadow-md transition">
+                  ${t('startFocus')}
+                </button>
+              ` : `
+                <button id="focus-pause-btn" class="flex-1 py-3.5 rounded-full bg-amber-500 text-white font-extrabold text-sm shadow-md transition">
+                  ${isPaused ? t('resume') : t('pause')}
+                </button>
+                <button id="focus-stop-btn" class="flex-1 py-3.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-sm shadow-md transition">
+                  ${mode === 'stopwatch' ? t('finish') : t('stop')}
+                </button>
+              `}
+            </div>
           </div>
         </div>
 
@@ -773,6 +751,71 @@ window.FocusModule = (function () {
     if (isRunning) {
       tickCheck(rerender);
       if (isRunning && !intervalId) runTickInterval(rerender);
+    }
+
+
+    const pickerPill = document.getElementById('focus-picker-pill');
+    if (pickerPill && !isRunning) {
+      pickerPill.onclick = () => {
+        const ar = isAr();
+        const dataNow = window.AppState.getData();
+        const subjects = dataNow.subjects || [];
+        const tags = dataNow.tags || [];
+        window.AppUI.openModal({
+          title: ar ? '📚 اختر المادة أو التصنيف' : '📚 Choose Subject or Tag',
+          bodyHtml: `
+            <div class="space-y-4">
+              ${subjects.length ? `
+                <div>
+                  <div class="text-[11px] font-bold text-slate-400 mb-2">${ar ? 'المواد' : 'Subjects'}</div>
+                  <div class="flex flex-wrap gap-2">
+                    ${subjects.map(s => {
+                      const act = s.id === selectedSubjectId;
+                      return `<button type="button" data-pick-focus-subj="${window.AppUI.escapeHtml(s.id)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition ${act ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}">
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(s.color)}"></span>
+                        <span>${window.AppUI.escapeHtml(s.name)}</span>
+                      </button>`;
+                    }).join('')}
+                  </div>
+                </div>
+              ` : ''}
+              <div>
+                <div class="text-[11px] font-bold text-slate-400 mb-2">${ar ? 'التصنيفات' : 'Tags'}</div>
+                <div class="flex flex-wrap gap-2">
+                  ${tags.map(tg => {
+                    const act = tg.id === selectedTagId && !selectedSubjectId;
+                    return `<button type="button" data-pick-focus-tag="${window.AppUI.escapeHtml(tg.id)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition ${act ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}">
+                      <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(tg.color)}"></span>
+                      <span>${window.AppUI.escapeHtml(tg.name)}</span>
+                    </button>`;
+                  }).join('')}
+                </div>
+              </div>
+            </div>
+          `,
+          footerHtml: `<button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إغلاق' : 'Close'}</button>`
+        });
+        document.querySelectorAll('[data-pick-focus-subj]').forEach(b => {
+          b.onclick = () => {
+            const sid = b.getAttribute('data-pick-focus-subj');
+            selectedSubjectId = sid;
+            const sObj = (window.AppState.getData().subjects || []).find(x => x.id === sid);
+            if (sObj && sObj.defaultTagId) selectedTagId = sObj.defaultTagId;
+            saveFocusPrefs();
+            window.AppUI.closeModal();
+            rerender();
+          };
+        });
+        document.querySelectorAll('[data-pick-focus-tag]').forEach(b => {
+          b.onclick = () => {
+            selectedTagId = b.getAttribute('data-pick-focus-tag');
+            selectedSubjectId = '';
+            saveFocusPrefs();
+            window.AppUI.closeModal();
+            rerender();
+          };
+        });
+      };
     }
 
     const zenBtn = document.getElementById('focus-zen-btn');

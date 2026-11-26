@@ -57,19 +57,7 @@ window.SettingsModule = (function () {
 
     return `
       <div class="space-y-4">
-        <!-- Language Switcher -->
-        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
-          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${t('languageTitle')}</h3>
-          <div class="grid grid-cols-2 gap-2">
-            <button id="setting-lang-en" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold transition ${curLang === 'en' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
-              🇬🇧 English
-            </button>
-            <button id="setting-lang-ar" type="button" class="py-2.5 px-3 rounded-xl text-xs font-bold transition ${curLang === 'ar' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}">
-              🇮🇶 العربية
-            </button>
-          </div>
-        </div>
-
+        <div class="settings-group-label">${isAr() ? "المظهر والإشعارات" : "Appearance & Alerts"}</div>
         <!-- Classic Liquid Glass Themes -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-2.5">
           <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">🎨 ${isAr() ? 'الأجواء الزجاجية الكلاسيكية' : 'Classic Glass Themes'}</h3>
@@ -118,6 +106,7 @@ window.SettingsModule = (function () {
           </div>
         </div>
 
+        <div class="settings-group-label">${isAr() ? "الحساب والمزامنة" : "Account & Sync"}</div>
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           ${(() => {
             const gUser = window.GoogleSync && window.GoogleSync.getUser();
@@ -184,6 +173,7 @@ window.SettingsModule = (function () {
           })()}
         </div>
 
+        <div class="settings-group-label">${isAr() ? "الدراسة والمواد" : "Study & Subjects"}</div>
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
           <div>
             <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">${t('startDateTitle')}</h3>
