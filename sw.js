@@ -1,7 +1,7 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v67';
+const APP_CACHE = 'study-tracker-shell-v69';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
@@ -23,20 +23,20 @@ const CORE_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(APP_CACHE)
-    .then((cache) => cache.addAll(CORE_ASSETS).catch(() => {}))
-    .then(() => self.skipWaiting())
+      .then((cache) => cache.addAll(CORE_ASSETS).catch(() => {}))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-    .then((keys) => Promise.all(
-      keys
-      .filter((k) => k.startsWith('study-tracker-shell-') && k !== APP_CACHE)
-      .map((k) => caches.delete(k))
-    ))
-    .then(() => self.clients.claim())
+      .then((keys) => Promise.all(
+        keys
+          .filter((k) => k.startsWith('study-tracker-shell-') && k !== APP_CACHE)
+          .map((k) => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
   );
 });
 
@@ -47,23 +47,23 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.includes('__study_tracker_push_meta__')) return;
-  
+
   // Network-First for HTML pages so updates on GitHub appear immediately
   if (req.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/')) {
     event.respondWith(
       fetch(req)
-      .then((res) => {
-        if (res && res.ok && res.type === 'basic') {
-          const clone = res.clone();
-          caches.open(APP_CACHE).then((c) => c.put(req, clone).catch(() => {}));
-        }
-        return res;
-      })
-      .catch(() => caches.match(req))
+        .then((res) => {
+          if (res && res.ok && res.type === 'basic') {
+            const clone = res.clone();
+            caches.open(APP_CACHE).then((c) => c.put(req, clone).catch(() => {}));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req))
     );
     return;
   }
-  
+
   event.respondWith(
     caches.open(APP_CACHE).then((cache) =>
       cache.match(req).then((cached) => {
@@ -104,11 +104,11 @@ self.addEventListener('push', (event) => {
         } catch (e2) {}
       }
     }
-    
+
     const saved = await getSavedPushMeta();
     const title = (payload && payload.title) || (saved && saved.title) || 'Study Session Complete! 📚';
     const body = (payload && payload.body) || (saved && saved.body) || 'Your Focus timer has finished. Great work!';
-    
+
     // Safari / iOS strictly requires showing a visible notification on every push event
     const notifOpts = {
       body,
@@ -135,7 +135,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = (event.notification.data && event.notification.data.url) || './';
-  
+
   event.waitUntil((async () => {
     const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of allClients) {
