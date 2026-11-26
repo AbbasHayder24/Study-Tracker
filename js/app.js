@@ -1,9 +1,9 @@
 /**
- * app.js — Main entry point: lazy-loaded tab modules, scoped tab re-rendering,
- * bilingual EN/AR toggle, header sync indicator, auto-sync on resume/online, 6-tab navigation
+ * app.js — Main entry point: Focus as main home screen, hamburger slide-out drawer for secondary views,
+ * lazy-loaded tab modules, scoped tab re-rendering, bilingual EN/AR toggle, header sync indicator
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '65';
+  const ASSET_VER = '67';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },
@@ -11,10 +11,12 @@ window.StudyApp = (function () {
     { id: 'challenge', key: 'tab_challenge', icon: '🎯' },
     { id: 'settings', key: 'tab_settings', icon: '⚙️' }
   ];
+  // Secondary views shown inside the ☰ drawer (Focus is the home screen returned to on exit)
+  const DRAWER_TABS = TABS.filter(tb => tb.id !== 'focus');
 
   // Each tab loads only the scripts it needs on first visit
   const TAB_SCRIPTS = {
-    focus: ['js/bookshelf.js', 'js/groups.js', 'js/focus.js'],
+    focus: ['js/bookshelf.js', 'js/focus.js'],
     hall: ['js/groups.js', 'js/bookshelf.js', 'js/focus.js'],
     stats: ['js/stats.js'],
     challenge: ['js/reviews.js', 'js/challenge.js'],
@@ -25,9 +27,22 @@ window.StudyApp = (function () {
   let lastHeaderSig = "";
   let lastNavLang = "";
   let renderSeq = 0;
+  let drawerOpen = false;
 
   function t(key, vars) {
     return window.I18n ? window.I18n.t(key, vars) : key;
+  }
+
+  function getTabDisplayLabel(tabId) {
+    if (tabId === 'challenge') {
+      const data = window.AppState.getData();
+      const customPlanName = (data && data.settings && data.settings.challenge && data.settings.challenge.name)
+        ? String(data.settings.challenge.name).trim()
+        : '';
+      if (customPlanName) return customPlanName;
+    }
+    const found = TABS.find(tb => tb.id === tabId);
+    return found ? t(found.key) : t('appTitle');
   }
 
   function loadScriptOnce(path) {
@@ -58,13 +73,40 @@ window.StudyApp = (function () {
 
   async function ensureTabLoaded(tabId) {
     const list = TAB_SCRIPTS[tabId] || [];
-    for (const path of list) {
-      await loadScriptOnce(path);
-    }
+    await Promise.all(list.map(path => loadScriptOnce(path)));
     if (tabId === 'focus' && window.FocusModule && !window.FocusModule.__prefsBooted) {
       window.FocusModule.__prefsBooted = true;
       if (window.FocusModule.syncFromSettings) window.FocusModule.syncFromSettings();
     }
+  }
+
+  function setDrawerOpen(open) {
+    drawerOpen = !!open;
+    const drawer = document.getElementById('app-drawer');
+    const backdrop = document.getElementById('app-drawer-backdrop');
+    const menuBtn = document.getElementById('app-menu-btn');
+    if (drawer) {
+      drawer.classList.toggle('is-open', drawerOpen);
+      drawer.setAttribute('aria-hidden', drawerOpen ? 'false' : 'true');
+    }
+    if (backdrop) {
+      backdrop.classList.toggle('is-open', drawerOpen);
+      backdrop.setAttribute('aria-hidden', drawerOpen ? 'false' : 'true');
+    }
+    if (menuBtn) {
+      menuBtn.setAttribute('aria-expanded', drawerOpen ? 'true' : 'false');
+    }
+    document.body.classList.toggle('drawer-open', drawerOpen);
+  }
+
+  function switchTab(nextTab) {
+    setDrawerOpen(false);
+    if (!nextTab) return;
+    if (nextTab === window.AppState.getActiveTab()) return;
+    window.AppState.setActiveTab(nextTab);
+    renderHeader();
+    renderNav();
+    renderMain(true, false);
   }
 
   function renderHeader() {
@@ -74,9 +116,41 @@ window.StudyApp = (function () {
     const hasSync = !!(window.GoogleSync && window.GoogleSync.getUser());
     const isAr = window.I18n && window.I18n.isRTL();
     const hUnit = t('hrs');
+    const active = window.AppState.getActiveTab();
+    const isHome = active === 'focus';
 
+    const backBtn = document.getElementById('app-back-btn');
+    const logoEl = document.getElementById('app-header-logo');
+    const logoFallback = document.getElementById('logo-fallback');
+    const menuBtn = document.getElementById('app-menu-btn');
     const titleEl = document.getElementById('app-header-title');
-    if (titleEl) titleEl.textContent = t('appTitle');
+
+    if (backBtn) {
+      backBtn.classList.toggle('hidden', isHome);
+      backBtn.title = isAr ? 'العودة إلى التركيز' : 'Back to Focus';
+      backBtn.setAttribute('aria-label', backBtn.title);
+      backBtn.onclick = () => switchTab('focus');
+    }
+    if (menuBtn) {
+      menuBtn.title = isAr ? 'القائمة' : 'Menu';
+      menuBtn.setAttribute('aria-label', menuBtn.title);
+      menuBtn.onclick = () => setDrawerOpen(!drawerOpen);
+    }
+    if (logoEl) {
+      logoEl.classList.toggle('hidden', !isHome);
+    }
+    if (logoFallback && !isHome) {
+      logoFallback.classList.add('hidden');
+    }
+    if (titleEl) {
+      if (isHome) {
+        titleEl.textContent = t('appTitle');
+      } else {
+        const activeObj = TABS.find(tb => tb.id === active);
+        const iconPrefix = activeObj ? `${activeObj.icon} ` : '';
+        titleEl.textContent = iconPrefix + getTabDisplayLabel(active);
+      }
+    }
 
     const syncIcon = syncStatus.state === 'syncing' ? '🔄' : (syncStatus.state === 'error' ? '⚠️' : '☁️');
     const syncBtnHtml = hasSync
@@ -136,46 +210,43 @@ window.StudyApp = (function () {
 
   function renderNav() {
     const active = window.AppState.getActiveTab();
-    const navEl = document.getElementById('app-bottom-nav');
+    const navEl = document.getElementById('app-drawer-nav');
     if (!navEl) return;
 
-    const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
-    const data = window.AppState.getData();
-    const customPlanName = (data && data.settings && data.settings.challenge && data.settings.challenge.name)
-      ? String(data.settings.challenge.name).trim()
-      : '';
-    const shortPlanName = customPlanName
-      ? (customPlanName.length > 10 ? customPlanName.slice(0, 9) + '…' : customPlanName)
-      : t('tab_challenge');
-    const navSig = `${curLang}|${shortPlanName}`;
+    const isAr = !!(window.I18n && window.I18n.isRTL());
+    const curLang = isAr ? 'ar' : 'en';
+    const planLabel = getTabDisplayLabel('challenge');
+
+    const drawerTitle = document.getElementById('app-drawer-title');
+    if (drawerTitle) drawerTitle.textContent = t('appTitle');
+    const drawerSub = document.getElementById('app-drawer-subtitle');
+    if (drawerSub) drawerSub.textContent = isAr ? 'الأقسام' : 'Sections';
+
+    const navSig = `${curLang}|${planLabel}`;
     if (!navEl.children.length || lastNavLang !== navSig) {
       lastNavLang = navSig;
-      navEl.innerHTML = TABS.map(tab => `
-        <button type="button" data-tab-id="${tab.id}"
-          class="flex-1 py-2 px-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition text-slate-500 dark:text-slate-400">
-          <span class="text-base leading-none">${tab.icon}</span>
-          <span class="truncate max-w-[60px]">${tab.id === 'challenge' ? window.AppUI.escapeHtml(shortPlanName) : t(tab.key)}</span>
-        </button>
-      `).join('');
+      navEl.innerHTML = DRAWER_TABS.map(tab => {
+        const label = tab.id === 'challenge' ? planLabel : t(tab.key);
+        return `
+          <button type="button" data-tab-id="${tab.id}" class="drawer-nav-item">
+            <span class="drawer-nav-icon">${tab.icon}</span>
+            <span class="drawer-nav-label">${window.AppUI.escapeHtml(label)}</span>
+            <span class="drawer-nav-dot" aria-hidden="true"></span>
+          </button>
+        `;
+      }).join('');
 
       navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
         btn.onclick = () => {
           const nextTab = btn.getAttribute('data-tab-id');
-          if (nextTab === window.AppState.getActiveTab()) return;
-          window.AppState.setActiveTab(nextTab);
-          renderNav();
-          renderMain(true, false);
+          switchTab(nextTab);
         };
       });
     }
 
     navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
       const isAct = btn.getAttribute('data-tab-id') === active;
-      btn.classList.toggle('text-indigo-600', isAct);
-      btn.classList.toggle('dark:text-indigo-400', isAct);
-      btn.classList.toggle('font-bold', isAct);
-      btn.classList.toggle('text-slate-500', !isAct);
-      btn.classList.toggle('dark:text-slate-400', !isAct);
+      btn.classList.toggle('is-active', isAct);
     });
   }
 
@@ -196,7 +267,7 @@ window.StudyApp = (function () {
   }
 
   function isModuleReady(tabId) {
-    if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule && window.GroupsModule);
+    if (tabId === 'focus') return !!(window.FocusModule && window.BookshelfModule);
     if (tabId === 'hall') return !!window.GroupsModule;
     if (tabId === 'stats') return !!window.StatsModule;
     if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
@@ -209,7 +280,9 @@ window.StudyApp = (function () {
     const active = window.AppState.getActiveTab();
     const nowTs = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
     const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
-    if (nowTs !== lastDataUpdatedAt || curLang !== lastNavLang) {
+    const planLabel = getTabDisplayLabel('challenge');
+    const navSig = `${curLang}|${planLabel}`;
+    if (nowTs !== lastDataUpdatedAt || navSig !== lastNavLang) {
       markAllTabsDirty(active);
       lastDataUpdatedAt = nowTs;
     }
@@ -434,6 +507,28 @@ window.StudyApp = (function () {
       });
     }
 
+    const drawerBackdrop = document.getElementById('app-drawer-backdrop');
+    if (drawerBackdrop) {
+      drawerBackdrop.addEventListener('click', () => setDrawerOpen(false));
+    }
+    const drawerClose = document.getElementById('app-drawer-close');
+    if (drawerClose) {
+      drawerClose.addEventListener('click', () => setDrawerOpen(false));
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return;
+      }
+      const modal = document.getElementById('app-modal-backdrop');
+      if (modal && !modal.classList.contains('hidden')) return;
+      if (window.AppState.getActiveTab() !== 'focus') {
+        switchTab('focus');
+      }
+    });
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         runBackgroundSync();
@@ -462,6 +557,8 @@ window.StudyApp = (function () {
     init,
     renderAll,
     renderHeader,
+    switchTab,
+    closeDrawer: () => setDrawerOpen(false),
     markOtherTabsDirty: () => markAllTabsDirty(window.AppState.getActiveTab())
   };
 })();

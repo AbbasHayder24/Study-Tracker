@@ -334,8 +334,34 @@ window.AppState = (function () {
     if (!hasPendingLocalWrite) return;
     hasPendingLocalWrite = false;
     try {
-      localStorage.setItem(C.STORAGE_KEY, JSON.stringify(data));
+      const raw = JSON.stringify(data);
+      localStorage.setItem(C.STORAGE_KEY, raw);
+      mirrorToIndexedDB(raw);
     } catch (e) {}
+  }
+
+  let idbTimer = null;
+  function mirrorToIndexedDB(rawJson) {
+    if (typeof indexedDB === 'undefined') return;
+    if (idbTimer) clearTimeout(idbTimer);
+    idbTimer = setTimeout(() => {
+      idbTimer = null;
+      try {
+        const req = indexedDB.open('study_tracker_idb_v1', 1);
+        req.onupgradeneeded = () => {
+          const idb = req.result;
+          if (!idb.objectStoreNames.contains('kv')) idb.createObjectStore('kv');
+        };
+        req.onsuccess = () => {
+          try {
+            const idb = req.result;
+            const tx = idb.transaction('kv', 'readwrite');
+            tx.objectStore('kv').put({ savedAt: Date.now(), raw: rawJson }, 'latest');
+            idb.close();
+          } catch (e) {}
+        };
+      } catch (e) {}
+    }, 600);
   }
 
   function scheduleLocalWrite() {

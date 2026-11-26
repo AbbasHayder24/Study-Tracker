@@ -132,8 +132,13 @@ window.GoogleSync = (function () {
             if (window.GroupsModule && window.GroupsModule.onAuthReady) {
               window.GroupsModule.onAuthReady(currentUser);
             }
-            if (prevUid !== currentUser.uid && window.StudyApp && window.StudyApp.renderAll) {
-              window.StudyApp.renderAll();
+            if (prevUid !== currentUser.uid && window.StudyApp) {
+              const tab = window.AppState ? window.AppState.getActiveTab() : 'focus';
+              if ((tab === 'settings' || tab === 'hall') && window.StudyApp.renderAll) {
+                window.StudyApp.renderAll();
+              } else if (window.StudyApp.renderHeader) {
+                window.StudyApp.renderHeader();
+              }
             }
             // Avoid double syncNow() when signIn() is actively handling the interactive sync
             if (!signingIn) {
@@ -177,11 +182,17 @@ window.GoogleSync = (function () {
     }, immediate ? 150 : 1200);
   }
 
-  function stableSnapshot(obj) {
+  let cachedSnapTs = -1;
+  let cachedSnapStr = '';
+  function stableSnapshot(obj, useCache = false) {
     try {
+      const ts = Number(obj && obj.updatedAt) || 0;
+      if (useCache && ts > 0 && ts === cachedSnapTs && cachedSnapStr) return cachedSnapStr;
       const copy = JSON.parse(JSON.stringify(obj || {}));
       delete copy.updatedAt;
-      return JSON.stringify(copy);
+      const str = JSON.stringify(copy);
+      if (useCache && ts > 0) { cachedSnapTs = ts; cachedSnapStr = str; }
+      return str;
     } catch (e) {
       return '';
     }
@@ -393,7 +404,7 @@ window.GoogleSync = (function () {
       // Always prefer live server read so a new device never sees a stale/empty cache
       const snap = await docRef.get({ source: 'server' }).catch(() => docRef.get());
       const localData = window.AppState.getData();
-      const localSnap = stableSnapshot(localData);
+      const localSnap = stableSnapshot(localData, true);
       const localWeight = countStudyWeight(localData);
 
       let merged = localData;
@@ -692,10 +703,17 @@ window.GoogleSync = (function () {
         }
       } catch (e) {}
     };
+    const scheduleBoot = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => setTimeout(bootInit, 900), { timeout: 2200 });
+      } else {
+        setTimeout(bootInit, 1600);
+      }
+    };
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => setTimeout(bootInit, 50), { once: true });
+      document.addEventListener('DOMContentLoaded', scheduleBoot, { once: true });
     } else {
-      setTimeout(bootInit, 50);
+      scheduleBoot();
     }
 
     // Re-initialize & flush pending changes when connectivity returns

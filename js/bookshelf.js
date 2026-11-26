@@ -137,144 +137,47 @@ window.BookshelfModule = (function () {
   }
 
   function renderClassic3DBookSVG(book, isSelected, opts) {
-    const { w, h, svgW, svgH, yTop, tagColor, subjColor, isGold, isIncomplete, safeId, shortTag, cx, cy, minUnit, lvl } = opts;
-    const clipId = `c3d_clip_${safeId}`;
-    const gradId = `c3d_gold_${safeId}`;
-    const shadeId = `c3d_shade_${safeId}`;
-    const pageGradId = `c3d_page_${safeId}`;
-
-    const spineFill = isGold ? `url(#${gradId})` : tagColor;
-    const opacity = isIncomplete ? '0.48' : '1';
-    const transform = isIncomplete ? `rotate(-9 ${svgW / 2} ${svgH})` : '';
-    const strokeCol = isSelected ? '#f43f5e' : (isGold ? '#92400e' : 'rgba(15,23,42,0.34)');
-    const strokeW = isSelected ? '2.5' : '1';
+    const { w, h, tagColor, subjColor, isGold, isIncomplete, shortTag, minUnit, lvl } = opts;
+    const baseBg = isGold
+      ? 'linear-gradient(90deg, #fef08a 0%, #f59e0b 32%, #d97706 76%, #92400e 100%)'
+      : `linear-gradient(90deg, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.06) 24%, rgba(0,0,0,0.06) 72%, rgba(0,0,0,0.34) 100%), ${window.AppUI.escapeHtml(tagColor)}`;
+    const borderCss = isSelected ? '2px solid #f43f5e' : (isGold ? '1px solid #92400e' : '1px solid rgba(15,23,42,0.32)');
     const showRibbon = !isIncomplete && (lvl.id === 'encyclopedia' || lvl.id === 'reference');
-
-    const twoToneBands = subjColor ? `
-      <g clip-path="url(#${clipId})">
-        <rect x="6" y="${yTop}" width="${w}" height="12" fill="${window.AppUI.escapeHtml(subjColor)}"/>
-        <rect x="6" y="${yTop + h - 15}" width="${w}" height="15" fill="${window.AppUI.escapeHtml(subjColor)}"/>
-      </g>
-    ` : '';
-
-    // Silk ribbon drapes cleanly over the front edge of the wooden shelf
-    const ribbonHtml = showRibbon ? `
-      <polygon points="${cx - 3},${yTop + h - 1} ${cx + 3},${yTop + h - 1} ${cx + 3},${yTop + h + 8} ${cx},${yTop + h + 5.2} ${cx - 3},${yTop + h + 8}"
-        fill="${isGold ? '#dc2626' : '#f59e0b'}" stroke="rgba(0,0,0,0.28)" stroke-width="0.5"/>
-    ` : '';
+    const safeSubj = subjColor ? window.AppUI.escapeHtml(subjColor) : '';
+    const textColor = isGold ? '#451a03' : '#ffffff';
 
     return `
-      <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" style="pointer-events:none;overflow:visible;" class="shrink-0 drop-shadow-sm transition-transform duration-200 group-hover:-translate-y-1">
-        <defs>
-          <clipPath id="${clipId}">
-            <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="3"/>
-          </clipPath>
-          <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#fef08a"/>
-            <stop offset="30%" stop-color="#f59e0b"/>
-            <stop offset="75%" stop-color="#d97706"/>
-            <stop offset="100%" stop-color="#92400e"/>
-          </linearGradient>
-          <linearGradient id="${shadeId}" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34"/>
-            <stop offset="22%" stop-color="#ffffff" stop-opacity="0.08"/>
-            <stop offset="70%" stop-color="#000000" stop-opacity="0.06"/>
-            <stop offset="100%" stop-color="#000000" stop-opacity="0.36"/>
-          </linearGradient>
-          <linearGradient id="${pageGradId}" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#fffbeb"/>
-            <stop offset="100%" stop-color="#e7dcc2"/>
-          </linearGradient>
-        </defs>
-        <g opacity="${opacity}" transform="${transform}">
-          <!-- Creamy 3D top page block peeking above spine -->
-          <path d="M ${7.2} ${yTop + 2} L ${8.5} ${yTop - 4.5} Q ${cx} ${yTop - 6.5} ${6 + w - 2.5} ${yTop - 4.5} L ${6 + w - 1.2} ${yTop + 2} Z"
-            fill="url(#${pageGradId})" stroke="rgba(120,53,15,0.28)" stroke-width="0.6"/>
-          <!-- Main spine resting flush on shelf -->
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="3" fill="${spineFill}"/>
-          ${twoToneBands}
-          <!-- 3D cylindrical lighting overlay -->
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="3" fill="url(#${shadeId})"/>
-          <!-- Embossed binding ribs -->
-          <line x1="7.5" y1="${yTop + 12}" x2="${6 + w - 1.5}" y2="${yTop + 12}" stroke="rgba(255,255,255,0.62)" stroke-width="1.2"/>
-          <line x1="7.5" y1="${yTop + 13.3}" x2="${6 + w - 1.5}" y2="${yTop + 13.3}" stroke="rgba(0,0,0,0.28)" stroke-width="0.9"/>
-          <line x1="7.5" y1="${yTop + h - 15}" x2="${6 + w - 1.5}" y2="${yTop + h - 15}" stroke="rgba(255,255,255,0.62)" stroke-width="1.2"/>
-          <line x1="7.5" y1="${yTop + h - 13.7}" x2="${6 + w - 1.5}" y2="${yTop + h - 13.7}" stroke="rgba(0,0,0,0.28)" stroke-width="0.9"/>
-          <!-- Spine border -->
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="3" fill="none" stroke="${strokeCol}" stroke-width="${strokeW}"/>
-          <!-- Labels -->
-          <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" unicode-bidi="plaintext"
-            transform="rotate(-90 ${cx} ${cy})" font-size="7.8" font-weight="700"
-            fill="${isGold ? '#451a03' : '#ffffff'}" opacity="0.96">${window.AppUI.escapeHtml(shortTag)}</text>
-          <text x="${cx}" y="${yTop + h - 4.5}" text-anchor="middle" font-size="7.8" font-weight="700"
-            fill="#ffffff">${Math.round(book.minutes)}${window.AppUI.escapeHtml(minUnit)}</text>
-          ${ribbonHtml}
-        </g>
-      </svg>
+      <div class="css-book-wrap" style="width:${w + 6}px;height:128px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;pointer-events:none;${isIncomplete ? 'opacity:0.48;transform:rotate(-8deg);transform-origin:bottom center;' : ''}">
+        <div style="width:${w - 4}px;height:5px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#fffbeb,#e7dcc2);border:0.6px solid rgba(120,53,15,0.28);border-bottom:0;margin-bottom:-1px"></div>
+        <div style="position:relative;width:${w}px;height:${h}px;border-radius:3px;background:${baseBg};border:${borderCss};box-shadow:1px 2px 4px rgba(15,23,42,0.16);display:flex;flex-direction:column;align-items:center;justify-content:space-between;overflow:visible">
+          ${safeSubj ? `<div style="position:absolute;top:0;left:0;right:0;height:12px;background:${safeSubj};border-radius:2px 2px 0 0;opacity:0.92"></div><div style="position:absolute;bottom:0;left:0;right:0;height:15px;background:${safeSubj};border-radius:0 0 2px 2px;opacity:0.92"></div>` : ''}
+          <div style="position:relative;z-index:1;width:100%;height:2px;margin-top:11px;background:rgba(255,255,255,0.55);border-bottom:1px solid rgba(0,0,0,0.22)"></div>
+          <span style="position:relative;z-index:1;writing-mode:vertical-rl;transform:rotate(180deg);font-size:8px;font-weight:700;color:${textColor};line-height:1;white-space:nowrap;overflow:hidden;max-height:${Math.max(24, h - 34)}px">${window.AppUI.escapeHtml(shortTag)}</span>
+          <div style="position:relative;z-index:1;width:100%;text-align:center;border-top:1px solid rgba(255,255,255,0.5);padding:1px 0 2px;font-size:7.5px;font-weight:800;color:#ffffff;line-height:1">${Math.round(book.minutes)}${window.AppUI.escapeHtml(minUnit)}</div>
+          ${showRibbon ? `<div style="position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);width:6px;height:8px;background:${isGold ? '#dc2626' : '#f59e0b'};clip-path:polygon(0 0,100% 0,100% 100%,50% 68%,0 100%)"></div>` : ''}
+        </div>
+      </div>
     `;
   }
 
   function renderMinimalBookSVG(book, isSelected, opts) {
-    const { w, h, svgW, svgH, yTop, tagColor, subjColor, isGold, isIncomplete, safeId, shortTag, cx, cy, minUnit } = opts;
-    const clipId = `min_clip_${safeId}`;
-    const gradId = `min_gold_${safeId}`;
-    const vShadeId = `min_vshade_${safeId}`;
-
-    const spineFill = isGold ? `url(#${gradId})` : tagColor;
-    const opacity = isIncomplete ? '0.46' : '1';
-    const transform = isIncomplete ? `rotate(-9 ${svgW / 2} ${svgH})` : '';
-    const strokeCol = isSelected ? '#f43f5e' : 'rgba(255,255,255,0.18)';
-    const strokeW = isSelected ? '2.5' : '0.8';
-
-    // Diagonal Subject corner + sleek parallel accent stripe
-    const diagH = Math.min(24, Math.round(h * 0.26));
-    const diagonalAccent = subjColor ? `
-      <g clip-path="url(#${clipId})">
-        <polygon points="6,${yTop} ${6 + w},${yTop} 6,${yTop + diagH}" fill="${window.AppUI.escapeHtml(subjColor)}" opacity="0.96"/>
-        <line x1="6" y1="${yTop + diagH + 4.5}" x2="${6 + w}" y2="${yTop + 4.5}" stroke="${window.AppUI.escapeHtml(subjColor)}" stroke-width="2.2" opacity="0.9"/>
-      </g>
-    ` : '';
-
-    // Generous frosted pill sized cleanly around the vertical tag label
-    const pillW = Math.max(11, Math.min(15, Math.round(w * 0.50)));
-    const pillH = Math.max(30, Math.min(54, h - 30));
-    const pillX = cx - pillW / 2;
-    const pillY = cy - pillH / 2;
+    const { w, h, tagColor, subjColor, isGold, isIncomplete, shortTag, minUnit } = opts;
+    const baseBg = isGold
+      ? 'linear-gradient(180deg, #fde047 0%, #f59e0b 55%, #b45309 100%)'
+      : `linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 50%, rgba(0,0,0,0.22) 100%), ${window.AppUI.escapeHtml(tagColor)}`;
+    const borderCss = isSelected ? '2px solid #f43f5e' : '1px solid rgba(255,255,255,0.2)';
+    const safeSubj = subjColor ? window.AppUI.escapeHtml(subjColor) : '';
+    const textColor = isGold ? '#451a03' : '#ffffff';
 
     return `
-      <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" style="pointer-events:none;overflow:visible;" class="shrink-0 drop-shadow-sm transition-transform duration-200 group-hover:-translate-y-1">
-        <defs>
-          <clipPath id="${clipId}">
-            <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="4.5"/>
-          </clipPath>
-          <linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#fde047"/>
-            <stop offset="55%" stop-color="#f59e0b"/>
-            <stop offset="100%" stop-color="#b45309"/>
-          </linearGradient>
-          <linearGradient id="${vShadeId}" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
-            <stop offset="50%" stop-color="#ffffff" stop-opacity="0"/>
-            <stop offset="100%" stop-color="#000000" stop-opacity="0.24"/>
-          </linearGradient>
-        </defs>
-        <g opacity="${opacity}" transform="${transform}">
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="4.5" fill="${spineFill}"/>
-          ${diagonalAccent}
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="4.5" fill="url(#${vShadeId})"/>
-          <!-- Frosted pill label backdrop -->
-          <rect x="${pillX}" y="${pillY}" width="${pillW}" height="${pillH}" rx="${pillW / 2}"
-            fill="rgba(255,255,255,0.20)" stroke="rgba(255,255,255,0.26)" stroke-width="0.6"/>
-          <!-- Crisp border -->
-          <rect x="6" y="${yTop}" width="${w}" height="${h}" rx="4.5" fill="none" stroke="${strokeCol}" stroke-width="${strokeW}"/>
-          <!-- Labels -->
-          <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" unicode-bidi="plaintext"
-            transform="rotate(-90 ${cx} ${cy})" font-size="7.2" font-weight="700"
-            fill="${isGold ? '#451a03' : '#ffffff'}" opacity="0.96">${window.AppUI.escapeHtml(shortTag)}</text>
-          <text x="${cx}" y="${yTop + h - 5}" text-anchor="middle" font-size="7.8" font-weight="700"
-            fill="#ffffff" opacity="0.96">${Math.round(book.minutes)}${window.AppUI.escapeHtml(minUnit)}</text>
-        </g>
-      </svg>
+      <div class="css-book-wrap" style="width:${w + 6}px;height:128px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;pointer-events:none;${isIncomplete ? 'opacity:0.46;transform:rotate(-8deg);transform-origin:bottom center;' : ''}">
+        <div style="position:relative;width:${w}px;height:${h}px;border-radius:4.5px;background:${baseBg};border:${borderCss};box-shadow:0 2px 4px rgba(15,23,42,0.14);display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:4px 0 3px;overflow:hidden">
+          ${safeSubj ? `<div style="position:absolute;top:0;left:0;width:100%;height:18px;background:${safeSubj};clip-path:polygon(0 0,100% 0,0 100%);opacity:0.95"></div>` : ''}
+          <div style="height:4px"></div>
+          <span style="position:relative;z-index:1;writing-mode:vertical-rl;transform:rotate(180deg);font-size:7.5px;font-weight:700;color:${textColor};padding:4px 2px;border-radius:9999px;background:rgba(255,255,255,0.20);line-height:1;white-space:nowrap;max-height:${Math.max(26, h - 30)}px;overflow:hidden">${window.AppUI.escapeHtml(shortTag)}</span>
+          <span style="position:relative;z-index:1;font-size:7.5px;font-weight:800;color:#ffffff;line-height:1">${Math.round(book.minutes)}${window.AppUI.escapeHtml(minUnit)}</span>
+        </div>
+      </div>
     `;
   }
 
