@@ -1,9 +1,9 @@
 /**
  * app.js — Main entry point: Focus as main home screen, hamburger slide-out drawer for secondary views,
- * lazy-loaded tab modules, scoped tab re-rendering, bilingual EN/AR toggle, header sync indicator
+ * modern uncluttered header, drawer preference footer, lazy-loaded tab modules, scoped tab re-rendering
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '67';
+  const ASSET_VER = '69';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },
@@ -111,7 +111,6 @@ window.StudyApp = (function () {
 
   function renderHeader() {
     const today = window.LedgerEngine.getTodaySummary();
-    const isDark = window.AppState.getIsDark();
     const syncStatus = window.AppState.getSyncStatus();
     const hasSync = !!(window.GoogleSync && window.GoogleSync.getUser());
     const isAr = window.I18n && window.I18n.isRTL();
@@ -125,6 +124,7 @@ window.StudyApp = (function () {
     const menuBtn = document.getElementById('app-menu-btn');
     const titleEl = document.getElementById('app-header-title');
 
+    // Modern mobile app bar: Home shows ☰ + Logo + Title; Secondary views show Back + Section Title
     if (backBtn) {
       backBtn.classList.toggle('hidden', isHome);
       backBtn.title = isAr ? 'العودة إلى التركيز' : 'Back to Focus';
@@ -132,6 +132,7 @@ window.StudyApp = (function () {
       backBtn.onclick = () => switchTab('focus');
     }
     if (menuBtn) {
+      menuBtn.classList.toggle('hidden', !isHome);
       menuBtn.title = isAr ? 'القائمة' : 'Menu';
       menuBtn.setAttribute('aria-label', menuBtn.title);
       menuBtn.onclick = () => setDrawerOpen(!drawerOpen);
@@ -157,23 +158,17 @@ window.StudyApp = (function () {
       ? `<button id="header-sync-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(syncStatus.lastError || t('syncNowTitle'))}">${syncIcon}</button>`
       : '';
 
-    const headerSig = `${today.logged}|${today.target}|${isDark}|${hasSync}|${syncStatus.state}|${isAr}`;
+    const headerSig = `${today.logged}|${today.target}|${hasSync}|${syncStatus.state}|${isAr}`;
     if (headerSig === lastHeaderSig) return;
     lastHeaderSig = headerSig;
 
     const headerEl = document.getElementById('app-header-meta');
     if (headerEl) {
       headerEl.innerHTML = `
-        <button id="header-daily-recap-btn" type="button" class="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold hover:opacity-85" title="${isAr ? 'خلاصة اليوم السريعة' : 'Quick Daily Recap'}">
+        <button id="header-daily-recap-btn" type="button" class="px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold hover:opacity-85" title="${isAr ? 'خلاصة اليوم السريعة' : 'Quick Daily Recap'}">
           ✨ ${t('todayShort')}: ${window.AppUI.formatHours(today.logged)}/${window.AppUI.formatHours(today.target)}${hUnit}
         </button>
         ${syncBtnHtml}
-        <button id="lang-toggle-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[11px] font-extrabold text-slate-700 dark:text-slate-200" title="${window.AppUI.escapeHtml(t('toggleLangTitle'))}">
-          ${isAr ? 'EN' : 'ع'}
-        </button>
-        <button id="theme-toggle-btn" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-sm" title="${window.AppUI.escapeHtml(t('toggleThemeTitle'))}">
-          ${isDark ? '☀️' : '🌙'}
-        </button>
       `;
 
       const recapBtn = document.getElementById('header-daily-recap-btn');
@@ -188,23 +183,40 @@ window.StudyApp = (function () {
           if (res && res.updated) renderAll();
         };
       }
+    }
+  }
 
-      const langBtn = document.getElementById('lang-toggle-btn');
-      if (langBtn) {
-        langBtn.onclick = () => {
-          window.I18n.toggleLang();
-          window.AppState.markLedgerDirty();
-          renderAll();
-        };
-      }
+  function renderDrawerFooter() {
+    const footerEl = document.getElementById('app-drawer-footer');
+    if (!footerEl) return;
+    const isDark = window.AppState.getIsDark();
+    const isAr = !!(window.I18n && window.I18n.isRTL());
 
-      const btn = document.getElementById('theme-toggle-btn');
-      if (btn) {
-        btn.onclick = () => {
-          window.AppState.toggleTheme();
-          renderHeader();
-        };
-      }
+    footerEl.innerHTML = `
+      <button id="drawer-theme-btn" type="button" class="drawer-pref-btn" title="${window.AppUI.escapeHtml(t('toggleThemeTitle'))}">
+        <span>${isDark ? '☀️' : '🌙'}</span>
+        <span>${isDark ? (isAr ? 'فاتح' : 'Light') : (isAr ? 'داكن' : 'Dark')}</span>
+      </button>
+      <button id="drawer-lang-btn" type="button" class="drawer-pref-btn" title="${window.AppUI.escapeHtml(t('toggleLangTitle'))}">
+        <span>🌐</span>
+        <span>${isAr ? 'English' : 'العربية'}</span>
+      </button>
+    `;
+
+    const themeBtn = document.getElementById('drawer-theme-btn');
+    if (themeBtn) {
+      themeBtn.onclick = () => {
+        window.AppState.toggleTheme();
+        renderDrawerFooter();
+      };
+    }
+    const langBtn = document.getElementById('drawer-lang-btn');
+    if (langBtn) {
+      langBtn.onclick = () => {
+        window.I18n.toggleLang();
+        window.AppState.markLedgerDirty();
+        renderAll();
+      };
     }
   }
 
@@ -248,6 +260,8 @@ window.StudyApp = (function () {
       const isAct = btn.getAttribute('data-tab-id') === active;
       btn.classList.toggle('is-active', isAct);
     });
+
+    renderDrawerFooter();
   }
 
   const tabDirty = { focus: true, hall: true, stats: true, challenge: true, settings: true };

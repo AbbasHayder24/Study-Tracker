@@ -119,41 +119,66 @@ window.SettingsModule = (function () {
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
-          <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${isAr() ? '☁️ المزامنة بحساب Google' : '☁️ Google Account Sync'}</h3>
-            ${window.GoogleSync && window.GoogleSync.getUser()
-              ? `<span class="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">● ${isAr() ? 'متصل' : 'Connected'}</span>`
-              : `<span class="text-[11px] text-slate-400">${isAr() ? 'غير متصل' : 'Not signed in'}</span>`
-            }
-          </div>
           ${(() => {
             const gUser = window.GoogleSync && window.GoogleSync.getUser();
             if (gUser) {
-              const syncMeta = syncStatus.state === 'error' && syncStatus.lastError
-                ? `<div class="text-[11px] text-rose-500 truncate">⚠️ ${window.AppUI.escapeHtml(syncStatus.lastError)}</div>`
-                : (lastTime ? `<div class="text-[11px] text-slate-400">${isAr() ? 'آخر مزامنة:' : 'Last sync:'} ${window.AppUI.escapeHtml(lastTime)}</div>` : '');
+              const displayName = gUser.displayName || (gUser.email ? gUser.email.split('@')[0] : 'Google');
+              const initial = Array.from(String(displayName).trim())[0] || 'G';
+              const isErr = syncStatus.state === 'error' && syncStatus.lastError;
+              const isSyncing = syncStatus.state === 'syncing';
+              const statusBadge = isSyncing
+                ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 shrink-0">${isAr() ? '🔄 يزامن...' : '🔄 Syncing'}</span>`
+                : (isErr
+                  ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 shrink-0">${isAr() ? '⚠️ خطأ' : '⚠️ Error'}</span>`
+                  : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 shrink-0">● ${isAr() ? 'متصل' : 'Synced'}</span>`);
+              const hasLocalBak = !!(window.GoogleSync && window.GoogleSync.getLocalPreSyncBackup && window.GoogleSync.getLocalPreSyncBackup());
               return `
-                <div class="text-xs text-slate-600 dark:text-slate-300 truncate">${window.AppUI.escapeHtml(gUser.displayName || gUser.email)} ${gUser.displayName && gUser.email ? `(${window.AppUI.escapeHtml(gUser.email)})` : ''}</div>
-                ${syncMeta}
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="w-10 h-10 rounded-full bg-indigo-600 text-white font-extrabold text-sm flex items-center justify-center shrink-0">${window.AppUI.escapeHtml(initial.toUpperCase())}</div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-sm font-extrabold text-slate-800 dark:text-slate-100 truncate">${window.AppUI.escapeHtml(displayName)}</div>
+                      ${statusBadge}
+                    </div>
+                    <div class="text-[11px] text-slate-400 truncate">${window.AppUI.escapeHtml(gUser.email || '')}</div>
+                  </div>
+                </div>
+                ${isErr
+                  ? `<div class="text-[11px] text-rose-500 bg-rose-50 dark:bg-rose-900/20 px-3 py-2 rounded-xl">⚠️ ${window.AppUI.escapeHtml(syncStatus.lastError)}</div>`
+                  : `<div class="text-[11px] text-slate-400 flex items-center justify-between">
+                      <span>${isAr() ? '☁️ المزامنة التلقائية مفعّلة' : '☁️ Auto-sync active'}</span>
+                      ${lastTime ? `<span>${isAr() ? 'آخر مزامنة:' : 'Last:'} ${window.AppUI.escapeHtml(lastTime)}</span>` : ''}
+                    </div>`
+                }
                 <div class="grid grid-cols-2 gap-2">
-                  <button id="setting-google-sync-now" type="button" class="py-2 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">${isAr() ? '🔄 مزامنة الآن' : '🔄 Sync Now'}</button>
-                  <button id="setting-google-signout" type="button" class="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">${isAr() ? 'تسجيل الخروج' : 'Sign Out'}</button>
+                  <button id="setting-google-sync-now" type="button" class="py-2.5 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">${isAr() ? '🔄 مزامنة الآن' : '🔄 Sync Now'}</button>
+                  <button id="setting-google-signout" type="button" class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold">${isAr() ? 'تسجيل الخروج' : 'Sign Out'}</button>
                 </div>
-                <div class="grid grid-cols-2 gap-2 pt-1">
-                  ${window.GoogleSync && window.GoogleSync.getLocalPreSyncBackup && window.GoogleSync.getLocalPreSyncBackup() ? `
-                    <button id="setting-restore-local-bak" type="button" class="py-2 px-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
-                      ${isAr() ? '⏪ نسخة قبل المزامنة' : '⏪ Pre-Sync Backup'}
+                <details class="sync-recovery-details">
+                  <summary class="text-[11px] font-bold text-slate-500 dark:text-slate-400 cursor-pointer py-1">${isAr() ? '🛡️ خيارات الاستعادة الاحتياطية' : '🛡️ Backup Recovery Options'}</summary>
+                  <div class="grid grid-cols-2 gap-2 pt-2">
+                    ${hasLocalBak ? `
+                      <button id="setting-restore-local-bak" type="button" class="py-2 px-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+                        ${isAr() ? '⏪ نسخة قبل المزامنة' : '⏪ Pre-Sync Backup'}
+                      </button>
+                    ` : ''}
+                    <button id="setting-restore-cloud-bak" type="button" class="py-2 px-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold ${hasLocalBak ? '' : 'col-span-2'}">
+                      ${isAr() ? '☁️ النسخة السحابية السابقة' : '☁️ Previous Cloud Backup'}
                     </button>
-                  ` : ''}
-                  <button id="setting-restore-cloud-bak" type="button" class="py-2 px-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold ${window.GoogleSync && window.GoogleSync.getLocalPreSyncBackup && window.GoogleSync.getLocalPreSyncBackup() ? '' : 'col-span-2'}">
-                    ${isAr() ? '☁️ استعادة النسخة السحابية السابقة' : '☁️ Restore Cloud Backup'}
-                  </button>
-                </div>
+                  </div>
+                </details>
               `;
             }
             return `
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">${isAr() ? '☁️ المزامنة بحساب Google' : '☁️ Google Account Sync'}</h3>
+                <span class="text-[11px] text-slate-400">${isAr() ? 'غير متصل' : 'Not signed in'}</span>
+              </div>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                ${isAr() ? 'احفظ ساعاتك وكتبك تلقائياً بين الآيفون والآيباد مع حماية ضد المسح.' : 'Sync your study hours and books automatically across devices with anti-wipe protection.'}
+              </p>
               <button id="setting-google-signin" type="button" class="w-full py-2.5 px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">
-                ${isAr() ? 'تسجيل الدخول والمزامنة بحساب Google' : 'Sign in & Sync with Google'}
+                ${isAr() ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google'}
               </button>
             `;
           })()}
@@ -580,7 +605,7 @@ window.SettingsModule = (function () {
           </div>
         `;
         const footerHtml = `
-          <button id="edit-subj-delete-btn" type="button" class="mr-auto px-3.5 py-2 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-xs font-bold">${ar ? 'حذف' : 'Delete'}</button>
+          <button id="edit-subj-delete-btn" type="button" class="me-auto px-3.5 py-2 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-xs font-bold">${ar ? 'حذف' : 'Delete'}</button>
           <button type="button" onclick="window.AppUI.closeModal()" class="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-xs font-bold">${ar ? 'إلغاء' : 'Cancel'}</button>
           <button id="edit-subj-save-btn" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">${ar ? 'حفظ' : 'Save'}</button>
         `;
