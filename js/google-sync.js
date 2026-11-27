@@ -169,7 +169,41 @@ window.GoogleSync = (function () {
     return initPromise;
   }
 
+
+  function pushLiveFocusToGroupsIfNeeded() {
+    try {
+      if (!currentUser || !db || !window.AppState) return;
+      if (window.GroupsModule && window.GroupsModule.schedulePresenceSync) return;
+      const d = window.AppState.getData();
+      const ids = (d && d.settings && Array.isArray(d.settings.groupIds)) ? d.settings.groupIds.filter(Boolean).slice(0, 3) : [];
+      if (!ids.length) return;
+      const timer = d.activeTimer || null;
+      const isStudying = !!(timer && timer.isRunning);
+      const isPaused = !!(isStudying && timer.isPaused);
+      let currentLabel = '';
+      if (isStudying && d.settings.groupShowSubject !== false && window.AppUI) {
+        const subj = timer.selectedSubjectId ? window.AppUI.getSubjectById(timer.selectedSubjectId) : null;
+        const tag = timer.selectedTagId ? window.AppUI.getTagById(timer.selectedTagId) : null;
+        if (subj && subj.name) currentLabel = subj.name;
+        else if (tag && tag.name) currentLabel = String(tag.name).replace(/^[^\p{L}\p{N}]+/u, '').trim() || tag.name;
+      }
+      const patch = {
+        uid: currentUser.uid,
+        isStudying,
+        isPaused,
+        studyStartedAt: (isStudying && !isPaused && timer.startedAt) ? Number(timer.startedAt) : null,
+        studyAccumulatedSec: isStudying ? (Number(timer.accumulatedSec) || 0) : 0,
+        currentLabel: currentLabel.slice(0, 28),
+        updatedAt: Date.now()
+      };
+      ids.forEach((gid) => {
+        db.collection('groups').doc(gid).collection('members').doc(currentUser.uid).update(patch).catch(() => {});
+      });
+    } catch (e) {}
+  }
+
   function onLocalSave(immediate = false) {
+    pushLiveFocusToGroupsIfNeeded();
     pendingPush = true;
     if (!isConfigured()) return;
     if (!currentUser && !localStorage.getItem('study_tracker_google_uid')) return;

@@ -127,7 +127,7 @@ window.GroupsModule = (function () {
   function isVerifiedBook(b) {
     if (!b || !b.completed) return false;
     const mins = Number(b.minutes) || 0;
-    if (mins < 5) return false;
+    if (mins < 1) return false;
     if (b.mode === 'pomodoro' && Number(b.durationSec) > 0 && Number(b.durationSec) <= 10) return false;
     return true;
   }
@@ -302,19 +302,20 @@ window.GroupsModule = (function () {
   }
 
   async function syncMyPresence(force = false) {
-    if (!window.GoogleSync || !window.GoogleSync.getUser()) return;
+    if (!window.GoogleSync || !getKnownUid()) return;
     if (navigator.onLine === false) return;
     const ids = getJoinedGroupIds();
     if (!ids.length) return;
 
+    const ready = await window.GoogleSync.ensureReady().catch(() => null);
+    if (!ready || !ready.db || !ready.user) return;
+
     const payload = computeMyStatsPayload();
-    if (!payload.uid) return;
+    if (!payload.uid) payload.uid = ready.user.uid;
     const sig = presenceSignature(payload) + '|' + ids.join(',');
     if (!force && sig === lastPresenceSig) return;
 
     try {
-      const ready = await window.GoogleSync.ensureReady();
-      if (!ready || !ready.db || !ready.user) return;
       const db = ready.db;
       await Promise.all(ids.map((gid) =>
         db.collection('groups').doc(gid).collection('members').doc(ready.user.uid)
@@ -395,7 +396,12 @@ window.GroupsModule = (function () {
       const byUid = new Map(members.map(m => [m.uid, m]));
       document.querySelectorAll('[data-live-member-clock]').forEach(el => {
         const uid = el.getAttribute('data-live-member-clock');
-        const m = byUid.get(uid);
+        let m = byUid.get(uid);
+        const myUid = getKnownUid();
+        if (m && myUid && uid === myUid) {
+          const lp = computeMyStatsPayload();
+          m = { ...m, isStudying: lp.isStudying, isPaused: lp.isPaused, studyStartedAt: lp.studyStartedAt, studyAccumulatedSec: lp.studyAccumulatedSec };
+        }
         if (m && isMemberActivelyStudying(m)) {
           el.textContent = formatClockHMS(getMemberLiveElapsedSec(m));
         }
@@ -1113,11 +1119,22 @@ window.GroupsModule = (function () {
       }
     } catch (e) {}
 
+    const myLocalPayload = user ? computeMyStatsPayload() : null;
     const members = rawMembers.map(m => {
       const isMeRow = !!(user && m.uid === user.uid);
-      const studying = isMemberActivelyStudying(m);
-      const paused = !!(m.isStudying && m.isPaused);
-      const liveExtraMin = studying ? Math.floor(getMemberLiveElapsedSec(m) / 60) : 0;
+      const eff = (isMeRow && myLocalPayload)
+        ? {
+            ...m,
+            isStudying: myLocalPayload.isStudying,
+            isPaused: myLocalPayload.isPaused,
+            studyStartedAt: myLocalPayload.studyStartedAt,
+            studyAccumulatedSec: myLocalPayload.studyAccumulatedSec,
+            currentLabel: myLocalPayload.currentLabel || m.currentLabel
+          }
+        : m;
+      const studying = isMemberActivelyStudying(eff);
+      const paused = !!(eff.isStudying && eff.isPaused);
+      const liveExtraMin = studying ? Math.floor(getMemberLiveElapsedSec(eff) / 60) : 0;
       const baseToday = m.todayISO === todayISO ? (Number(m.todayMinutes) || 0) : 0;
       const baseWeek = m.weekKey === weekKey ? (Number(m.weekMinutes) || 0) : 0;
       const todayBooksArr = (m.todayISO === todayISO && Array.isArray(m.todayShelfBooks)) ? m.todayShelfBooks : [];
@@ -1125,10 +1142,10 @@ window.GroupsModule = (function () {
         ? myLiveDeficit
         : Math.max(0, Math.round((Number(m.deficitHours) || 0) * 10) / 10);
       return {
-        ...m,
+        ...eff,
         _studying: studying,
         _paused: paused,
-        _liveSec: studying ? getMemberLiveElapsedSec(m) : 0,
+        _liveSec: studying ? getMemberLiveElapsedSec(eff) : 0,
         _todayMins: Math.min(MAX_DAILY_MINUTES, baseToday + liveExtraMin),
         _weekMins: Math.min(MAX_DAILY_MINUTES * 7, baseWeek + liveExtraMin),
         _weekMorningMins: m.weekKey === weekKey ? (Number(m.weekMorningMins) || 0) : 0,
