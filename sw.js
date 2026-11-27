@@ -1,7 +1,7 @@
 /**
  * sw.js — Service Worker for Study Tracker (Fast Offline Cache + Background Web Push)
  */
-const APP_CACHE = 'study-tracker-shell-v78';
+const APP_CACHE = 'study-tracker-shell-v80';
 const PUSH_META_CACHE = 'study-tracker-push-meta-v1';
 const PUSH_META_URL = './__study_tracker_push_meta__';
 
@@ -10,23 +10,23 @@ const CORE_ASSETS = [
   './index.html',
   './manifest.json',
   './image.png',
-  './css/styles.css?v=78',
-  './js/config.js?v=78',
-  './js/i18n.js?v=78',
-  './js/state.js?v=78',
-  './js/google-sync.js?v=78',
-  './js/push.js?v=78',
-  './js/ledger.js?v=78',
-  './js/ui.js?v=78',
-  './js/app.js?v=78',
-  './js/bookshelf.js?v=78',
-  './js/focus.js?v=78',
-  './js/stats.js?v=78',
-  './js/reviews.js?v=78',
-  './js/groups.js?v=78',
-  './js/challenge.js?v=78',
-  './js/settings.js?v=78',
-  './js/profile.js?v=78'
+  './css/styles.css?v=80',
+  './js/config.js?v=80',
+  './js/i18n.js?v=80',
+  './js/state.js?v=80',
+  './js/google-sync.js?v=80',
+  './js/push.js?v=80',
+  './js/ledger.js?v=80',
+  './js/ui.js?v=80',
+  './js/app.js?v=80',
+  './js/bookshelf.js?v=80',
+  './js/focus.js?v=80',
+  './js/stats.js?v=80',
+  './js/reviews.js?v=80',
+  './js/groups.js?v=80',
+  './js/challenge.js?v=80',
+  './js/settings.js?v=80',
+  './js/profile.js?v=80'
 ];
 
 self.addEventListener('install', (event) => {

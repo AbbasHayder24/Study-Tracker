@@ -43,6 +43,13 @@ window.GroupsModule = (function () {
     return !!(window.I18n && window.I18n.isRTL());
   }
 
+  function getKnownUid() {
+    const u = window.GoogleSync && window.GoogleSync.getUser();
+    if (u && u.uid) return u.uid;
+    try { return localStorage.getItem('study_tracker_google_uid') || ''; } catch (e) { return ''; }
+  }
+
+
   function escapeHtml(s) {
     return window.AppUI ? window.AppUI.escapeHtml(s) : String(s || '');
   }
@@ -250,8 +257,8 @@ window.GroupsModule = (function () {
     const nickname = (prof.name && String(prof.name).trim()) || (st.groupNickname && String(st.groupNickname).trim()) || defaultName;
     const avatar = prof.avatar || '';
     const profileColor = prof.color || '';
-    const major = (prof.major && String(prof.major).trim()).slice(0, 44);
-    const bio = (prof.bio && String(prof.bio).trim()).slice(0, 90);
+    const major = String(prof.major || '').trim().slice(0, 44);
+    const bio = String(prof.bio || '').trim().slice(0, 90);
     const leaderMotto = (st.leaderMottoDate === todayISO && st.leaderMotto) ? String(st.leaderMotto).trim().slice(0, 80) : '';
 
     return {
@@ -413,7 +420,8 @@ window.GroupsModule = (function () {
   async function attachLiveListener(rerender) {
     if (rerender) lastRerenderFn = rerender;
     const gid = getActiveGroupId();
-    if (!gid || !window.GoogleSync || !window.GoogleSync.getUser()) {
+    const knownUid = getKnownUid();
+    if (!gid || !window.GoogleSync || !knownUid) {
       detach();
       return;
     }
@@ -520,6 +528,7 @@ window.GroupsModule = (function () {
       const meta = { name: cleanName, code, ownerUid: ready.user.uid, vibe: 'library', createdAt: now, updatedAt: now };
       await db.collection('groups').doc(code).set(meta);
       const myPayload = computeMyStatsPayload();
+      if (!myPayload.uid) myPayload.uid = ready.user.uid;
       await db.collection('groups').doc(code).collection('members').doc(ready.user.uid).set(myPayload);
 
       groupMetaMap[code] = { id: code, ...meta };
@@ -570,6 +579,7 @@ window.GroupsModule = (function () {
       }
 
       const myPayload = computeMyStatsPayload();
+      if (!myPayload.uid) myPayload.uid = ready.user.uid;
       await db.collection('groups').doc(code).collection('members').doc(ready.user.uid).set(myPayload, { merge: true });
 
       groupMetaMap[code] = { id: code, ...gDoc.data() };
@@ -582,7 +592,8 @@ window.GroupsModule = (function () {
       window.AppUI.showToast(ar ? `انضممت إلى «${groupMetaMap[code].name}» 🎉` : `Joined "${groupMetaMap[code].name}" 🎉`, 'success');
       return true;
     } catch (err) {
-      window.AppUI.showToast(ar ? 'تعذر الانضمام — تحقق من الاتصال أو الصلاحيات' : 'Failed to join — check connection or rules', 'error');
+      const detail = (err && (err.code || err.message)) ? ` (${err.code || err.message})` : '';
+      window.AppUI.showToast((ar ? 'تعذر الانضمام' : 'Failed to join') + detail, 'error');
       return false;
     }
   }
@@ -1044,7 +1055,9 @@ window.GroupsModule = (function () {
 
   function render() {
     const ar = isAr();
-    const user = window.GoogleSync && window.GoogleSync.getUser();
+    const liveUser = window.GoogleSync && window.GoogleSync.getUser();
+    const knownUid = getKnownUid();
+    const user = liveUser || (knownUid ? { uid: knownUid } : null);
 
     if (!user) {
       return `
