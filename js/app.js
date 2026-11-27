@@ -3,7 +3,7 @@
  * modern uncluttered header, drawer preference footer, lazy-loaded tab modules, scoped tab re-rendering
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '76';
+  const ASSET_VER = '78';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },

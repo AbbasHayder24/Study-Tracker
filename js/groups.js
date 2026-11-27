@@ -457,10 +457,14 @@ window.GroupsModule = (function () {
         groupMembersMap[gid] = list;
         groupFetchedAt[gid] = Date.now();
         saveCache();
+        const meDoc = ready.user ? list.find(x => x.uid === ready.user.uid) : null;
+        if (meDoc && (typeof meDoc.deficitHours !== 'number' || typeof meDoc.avatar === 'undefined')) {
+          syncMyPresence(true);
+        }
         if (lastRerenderFn) lastRerenderFn();
       }, () => {});
 
-      syncMyPresence(false);
+      syncMyPresence(true);
     } catch (e) {
       isLoadingGroup = false;
     }
@@ -610,6 +614,46 @@ window.GroupsModule = (function () {
       window.AppUI.showToast(ar ? 'تعذر حذف القاعة' : 'Could not delete hall', 'error');
     }
   }
+
+  async function renameGroup(gid, newName) {
+    const ar = isAr();
+    const clean = String(newName || '').trim().slice(0, 36);
+    if (!clean) {
+      window.AppUI.showToast(ar ? 'اكتب اسماً صحيحاً للقاعة' : 'Enter a valid hall name', 'error');
+      return false;
+    }
+    try {
+      const ready = await window.GoogleSync.ensureReady();
+      if (!ready || !ready.db) return false;
+      await ready.db.collection('groups').doc(gid).update({ name: clean, updatedAt: Date.now() });
+      if (groupMetaMap[gid]) groupMetaMap[gid].name = clean;
+      saveCache();
+      window.AppUI.showToast(ar ? `تم تغيير اسم القاعة إلى «${clean}» ✓` : `Hall renamed to "${clean}" ✓`, 'success');
+      return true;
+    } catch (e) {
+      window.AppUI.showToast(ar ? 'تعذر تغيير الاسم — للمنشئ فقط' : 'Could not rename — owner only', 'error');
+      return false;
+    }
+  }
+
+  async function kickMember(gid, targetUid, targetName) {
+    const ar = isAr();
+    try {
+      const ready = await window.GoogleSync.ensureReady();
+      if (!ready || !ready.db) return false;
+      await ready.db.collection('groups').doc(gid).collection('members').doc(targetUid).delete();
+      if (Array.isArray(groupMembersMap[gid])) {
+        groupMembersMap[gid] = groupMembersMap[gid].filter(m => m.uid !== targetUid);
+        saveCache();
+      }
+      window.AppUI.showToast(ar ? `تم طرد ${targetName || 'العضو'} من القاعة` : `Removed ${targetName || 'member'} from hall`, 'info');
+      return true;
+    } catch (e) {
+      window.AppUI.showToast(ar ? 'تعذر طرد العضو — للمنشئ فقط' : 'Could not remove member — owner only', 'error');
+      return false;
+    }
+  }
+
 
   function copyTextToClipboard(text, okMsg) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -841,6 +885,12 @@ window.GroupsModule = (function () {
               `).join('')}
             </div>
           </div>
+          ${isOwner ? `
+            <div>
+              <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'اسم القاعة (للمنشئ)' : 'Hall Name (Owner)'}</label>
+              <input id="hall-set-group-name" type="text" maxlength="36" value="${escapeHtml((meta && meta.name) || gid)}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-bold"/>
+            </div>
+          ` : ''}
           <div>
             <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">${ar ? 'اسمك الظاهر في القاعة' : 'Display Nickname'}</label>
             <input id="hall-set-nick" type="text" maxlength="32" value="${escapeHtml(curNick)}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs"/>
@@ -849,6 +899,21 @@ window.GroupsModule = (function () {
             <span class="text-xs font-bold text-slate-700 dark:text-slate-200">${ar ? 'إظهار اسم المادة أثناء الدراسة' : 'Show subject while studying'}</span>
             <input id="hall-set-show-subj" type="checkbox" ${showSubj ? 'checked' : ''} class="w-4 h-4"/>
           </label>
+          ${isOwner ? (() => {
+            const others = (Array.isArray(groupMembersMap[gid]) ? groupMembersMap[gid] : []).filter(m => !user || m.uid !== user.uid);
+            if (!others.length) return '';
+            return `
+              <div class="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+                <div class="text-[11px] font-bold text-slate-400">${ar ? 'إدارة الأعضاء (طرد)' : 'Manage Members (Remove)'}</div>
+                ${others.map(om => `
+                  <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-xs">
+                    <span class="font-bold text-slate-700 dark:text-slate-200 truncate">${escapeHtml(om.avatar || '👤')} ${escapeHtml(om.nickname || 'Student')}</span>
+                    <button type="button" data-kick-uid="${escapeHtml(om.uid)}" data-kick-name="${escapeHtml(om.nickname || 'Student')}" class="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[11px] font-bold shrink-0">${ar ? 'طرد' : 'Kick'}</button>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          })() : ''}
         </div>
       `,
       footerHtml: `
@@ -872,6 +937,23 @@ window.GroupsModule = (function () {
       };
     });
 
+
+    document.querySelectorAll('[data-kick-uid]').forEach(kb => {
+      kb.onclick = () => {
+        const tUid = kb.getAttribute('data-kick-uid');
+        const tName = kb.getAttribute('data-kick-name') || '';
+        window.AppUI.confirmAction({
+          title: ar ? 'طرد عضو من القاعة' : 'Remove Member',
+          message: ar ? `هل تريد طرد «${tName}» من القاعة؟` : `Remove "${tName}" from this hall?`,
+          confirmText: ar ? 'طرد' : 'Remove',
+          onConfirm: async () => {
+            await kickMember(gid, tUid, tName);
+            if (rerender) rerender();
+          }
+        });
+      };
+    });
+
     const copyBtn = document.getElementById('hall-modal-copy');
     if (copyBtn) copyBtn.onclick = () => copyInviteLink(gid);
 
@@ -886,10 +968,18 @@ window.GroupsModule = (function () {
         window.AppState.save(true);
         syncMyPresence(true);
         if (isOwner) {
+          const nameInputEl = document.getElementById('hall-set-group-name');
+          const newGName = nameInputEl ? (nameInputEl.value || '').trim().slice(0, 36) : '';
           try {
             const ready = await window.GoogleSync.ensureReady();
             if (ready && ready.db) {
-              await ready.db.collection('groups').doc(gid).update({ vibe: pickedVibe }).catch(() => {});
+              const patch = { vibe: pickedVibe, updatedAt: Date.now() };
+              if (newGName) patch.name = newGName;
+              await ready.db.collection('groups').doc(gid).update(patch).catch(() => {});
+              if (newGName && groupMetaMap[gid]) {
+                groupMetaMap[gid].name = newGName;
+                saveCache();
+              }
             }
           } catch (e) {}
         }
@@ -1002,13 +1092,25 @@ window.GroupsModule = (function () {
     const todayISO = window.AppState.getLocalTodayISO();
     const weekKey = getWeekKey(todayISO);
 
+    let myLiveDeficit = 0;
+    try {
+      if (window.LedgerEngine && window.LedgerEngine.computeLedger) {
+        const led = window.LedgerEngine.computeLedger();
+        myLiveDeficit = Math.max(0, Math.round((Number(led && led.carriedDeficit) || 0) * 10) / 10);
+      }
+    } catch (e) {}
+
     const members = rawMembers.map(m => {
+      const isMeRow = !!(user && m.uid === user.uid);
       const studying = isMemberActivelyStudying(m);
       const paused = !!(m.isStudying && m.isPaused);
       const liveExtraMin = studying ? Math.floor(getMemberLiveElapsedSec(m) / 60) : 0;
       const baseToday = m.todayISO === todayISO ? (Number(m.todayMinutes) || 0) : 0;
       const baseWeek = m.weekKey === weekKey ? (Number(m.weekMinutes) || 0) : 0;
       const todayBooksArr = (m.todayISO === todayISO && Array.isArray(m.todayShelfBooks)) ? m.todayShelfBooks : [];
+      const rowDeficit = isMeRow
+        ? myLiveDeficit
+        : Math.max(0, Math.round((Number(m.deficitHours) || 0) * 10) / 10);
       return {
         ...m,
         _studying: studying,
@@ -1019,7 +1121,7 @@ window.GroupsModule = (function () {
         _weekMorningMins: m.weekKey === weekKey ? (Number(m.weekMorningMins) || 0) : 0,
         _weekNightMins: m.weekKey === weekKey ? (Number(m.weekNightMins) || 0) : 0,
         _weekLongestSession: m.weekKey === weekKey ? (Number(m.weekLongestSession) || 0) : 0,
-        _deficit: Math.max(0, Math.round((Number(m.deficitHours) || 0) * 10) / 10),
+        _deficit: rowDeficit,
         _todayShelfBooks: todayBooksArr,
         _tier: getWeeklyTier(Math.min(MAX_DAILY_MINUTES * 7, baseWeek + liveExtraMin))
       };
@@ -1380,7 +1482,11 @@ window.GroupsModule = (function () {
         const wMins = (m.weekKey === weekKey ? (Number(m.weekMinutes) || 0) : 0) + liveExtra;
         const totHrs = Math.round(((Number(m.totalMinutes) || 0) / 60) * 10) / 10;
         const tier = getWeeklyTier(wMins);
-        const def = Math.max(0, Math.round((Number(m.deficitHours) || 0) * 10) / 10);
+        const curU = window.GoogleSync && window.GoogleSync.getUser();
+        let def = Math.max(0, Math.round((Number(m.deficitHours) || 0) * 10) / 10);
+        if (curU && m.uid === curU.uid && window.LedgerEngine && window.LedgerEngine.computeLedger) {
+          def = Math.max(0, Math.round((Number(window.LedgerEngine.computeLedger().carriedDeficit) || 0) * 10) / 10);
+        }
         const col = m.profileColor || avatarColorFor(m.nickname || m.uid);
         window.AppUI.openModal({
           title: `${m.avatar || '👤'} ${m.nickname || 'Student'}`,
@@ -1415,8 +1521,27 @@ window.GroupsModule = (function () {
               </div>
             </div>
           `,
-          footerHtml: `<button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إغلاق' : 'Close'}</button>`
+          footerHtml: `
+            ${(curU && groupMetaMap[gid] && groupMetaMap[gid].ownerUid === curU.uid && m.uid !== curU.uid)
+              ? `<button id="hall-modal-kick-member" type="button" class="me-auto px-3 py-2 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-xs font-bold">${ar ? 'طرد من القاعة' : 'Kick'}</button>`
+              : ''}
+            <button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إغلاق' : 'Close'}</button>
+          `
         });
+        const kmBtn = document.getElementById('hall-modal-kick-member');
+        if (kmBtn) {
+          kmBtn.onclick = () => {
+            window.AppUI.confirmAction({
+              title: ar ? 'طرد عضو من القاعة' : 'Remove Member',
+              message: ar ? `هل تريد طرد «${m.nickname || 'العضو'}» من القاعة؟` : `Remove "${m.nickname || 'member'}" from this hall?`,
+              confirmText: ar ? 'طرد' : 'Remove',
+              onConfirm: async () => {
+                await kickMember(gid, m.uid, m.nickname || '');
+                if (rerender) rerender();
+              }
+            });
+          };
+        }
       };
     });
 
