@@ -3,16 +3,17 @@
  * modern uncluttered header, drawer preference footer, lazy-loaded tab modules, scoped tab re-rendering
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '71';
+  const ASSET_VER = '76';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },
     { id: 'stats', key: 'tab_stats', icon: '📈' },
     { id: 'challenge', key: 'tab_challenge', icon: '🎯' },
-    { id: 'settings', key: 'tab_settings', icon: '⚙️' }
+    { id: 'settings', key: 'tab_settings', icon: '⚙️' },
+    { id: 'profile', key: 'tab_profile', icon: '👤' }
   ];
   // Secondary views shown inside the ☰ drawer (Focus is the home screen returned to on exit)
-  const DRAWER_TABS = TABS.filter(tb => tb.id !== 'focus');
+  const DRAWER_TABS = TABS.filter(tb => tb.id !== 'focus' && tb.id !== 'profile');
 
   // Each tab loads only the scripts it needs on first visit
   const TAB_SCRIPTS = {
@@ -20,7 +21,8 @@ window.StudyApp = (function () {
     hall: ['js/groups.js', 'js/bookshelf.js', 'js/focus.js'],
     stats: ['js/stats.js'],
     challenge: ['js/reviews.js', 'js/challenge.js'],
-    settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js']
+    settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js'],
+    profile: ['js/profile.js']
   };
 
   const scriptPromises = {};
@@ -41,6 +43,7 @@ window.StudyApp = (function () {
         : '';
       if (customPlanName) return customPlanName;
     }
+    if (tabId === 'profile') return (window.I18n && window.I18n.isRTL()) ? 'البروفايل' : 'Profile';
     const found = TABS.find(tb => tb.id === tabId);
     return found ? t(found.key) : t('appTitle');
   }
@@ -229,10 +232,32 @@ window.StudyApp = (function () {
     const curLang = isAr ? 'ar' : 'en';
     const planLabel = getTabDisplayLabel('challenge');
 
+    const dataNow = window.AppState.getData();
+    const profObj = (dataNow && dataNow.settings && dataNow.settings.profile) || {};
+    const gUser = window.GoogleSync && window.GoogleSync.getUser();
+    const profAvatar = profObj.avatar || '🦉';
+    const profColor = profObj.color || '#4f46e5';
+    const profName = (profObj.name && String(profObj.name).trim())
+      || (dataNow && dataNow.settings && dataNow.settings.groupNickname)
+      || (gUser && (gUser.displayName || (gUser.email ? gUser.email.split('@')[0] : '')))
+      || t('appTitle');
+    const profSub = (profObj.major && String(profObj.major).trim())
+      || (isAr ? 'عرض البروفايل والأوسمة ›' : 'View profile & badges ›');
+
+    const avEl = document.getElementById('drawer-prof-avatar');
+    if (avEl) {
+      avEl.textContent = profAvatar;
+      avEl.style.background = profColor;
+    }
     const drawerTitle = document.getElementById('app-drawer-title');
-    if (drawerTitle) drawerTitle.textContent = t('appTitle');
+    if (drawerTitle) drawerTitle.textContent = profName;
     const drawerSub = document.getElementById('app-drawer-subtitle');
-    if (drawerSub) drawerSub.textContent = isAr ? 'الأقسام' : 'Sections';
+    if (drawerSub) drawerSub.textContent = profSub;
+    const profBtn = document.getElementById('app-drawer-profile-btn');
+    if (profBtn) {
+      profBtn.classList.toggle('is-active', active === 'profile');
+      profBtn.onclick = () => switchTab('profile');
+    }
 
     const navSig = `${curLang}|${planLabel}`;
     if (!navEl.children.length || lastNavLang !== navSig) {
@@ -264,7 +289,7 @@ window.StudyApp = (function () {
     renderDrawerFooter();
   }
 
-  const tabDirty = { focus: true, hall: true, stats: true, challenge: true, settings: true };
+  const tabDirty = { focus: true, hall: true, stats: true, challenge: true, settings: true, profile: true };
   const tabScrollY = {};
   let currentMountedTab = null;
   let lastDataUpdatedAt = 0;
@@ -286,6 +311,7 @@ window.StudyApp = (function () {
     if (tabId === 'stats') return !!window.StatsModule;
     if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
     if (tabId === 'settings') return !!(window.SettingsModule && window.ChallengeModule);
+    if (tabId === 'profile') return !!window.ProfileModule;
     return true;
   }
 
@@ -422,6 +448,7 @@ window.StudyApp = (function () {
       else if (active === 'stats') html = window.StatsModule.render();
       else if (active === 'challenge') html = window.ChallengeModule.render();
       else if (active === 'settings') html = window.SettingsModule.render();
+      else if (active === 'profile') html = window.ProfileModule.render();
 
       activePanel.innerHTML = html;
       tabDirty[active] = false;
@@ -432,6 +459,7 @@ window.StudyApp = (function () {
       else if (active === 'stats') window.StatsModule.bindEvents(scopedCb);
       else if (active === 'challenge') window.ChallengeModule.bindEvents(scopedCb);
       else if (active === 'settings') window.SettingsModule.bindEvents(scopedCb);
+      else if (active === 'profile') window.ProfileModule.bindEvents(scopedCb);
     }
 
     if (animate && currentMountedTab !== active) {

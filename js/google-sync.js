@@ -133,7 +133,7 @@ window.GoogleSync = (function () {
             }
             if (prevUid !== currentUser.uid && window.StudyApp) {
               const tab = window.AppState ? window.AppState.getActiveTab() : 'focus';
-              if ((tab === 'settings' || tab === 'hall') && window.StudyApp.renderAll) {
+              if ((tab === 'settings' || tab === 'hall' || tab === 'profile') && window.StudyApp.renderAll) {
                 window.StudyApp.renderAll();
               } else if (window.StudyApp.renderHeader) {
                 window.StudyApp.renderHeader();

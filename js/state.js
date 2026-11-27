@@ -81,7 +81,7 @@ window.AppState = (function () {
   data = createDefaultState();
   let ledgerDirty = true;
   let cachedLedger = null;
-  const VALID_TABS = new Set(['focus', 'hall', 'stats', 'challenge', 'settings']);
+  const VALID_TABS = new Set(['focus', 'hall', 'stats', 'challenge', 'settings', 'profile']);
   let activeTab = 'focus';
   try {
     const savedTab = localStorage.getItem('study_tracker_active_tab');
@@ -234,10 +234,31 @@ window.AppState = (function () {
     const rTimerTs = rTimer ? (Number(rTimer.updatedAt) || 0) : 0;
     const resolvedTimer = lTimerTs >= rTimerTs ? lTimer : rTimer;
 
+    const secSet = secondary.settings || {};
+    const priSet = primary.settings || {};
+    const secProf = (secSet.profile && typeof secSet.profile === 'object') ? secSet.profile : {};
+    const priProf = (priSet.profile && typeof priSet.profile === 'object') ? priSet.profile : {};
+    const mergedProfile = { ...secProf };
+    Object.keys(priProf).forEach(k => {
+      if (priProf[k] !== undefined && priProf[k] !== null && String(priProf[k]).trim() !== '') {
+        mergedProfile[k] = priProf[k];
+      }
+    });
+    const mergedGroupIds = Array.from(new Set([
+      ...(Array.isArray(priSet.groupIds) ? priSet.groupIds : []),
+      ...(Array.isArray(secSet.groupIds) ? secSet.groupIds : [])
+    ].filter(Boolean))).slice(0, 3);
+    const mergedHallVibes = {
+      ...(secSet.hallVibes && typeof secSet.hallVibes === 'object' ? secSet.hallVibes : {}),
+      ...(priSet.hallVibes && typeof priSet.hallVibes === 'object' ? priSet.hallVibes : {})
+    };
     const mergedSettings = {
-      ...(secondary.settings || {}),
-      ...(primary.settings || {}),
-      challenge: (primary.settings && primary.settings.challenge) || (secondary.settings && secondary.settings.challenge) || null
+      ...secSet,
+      ...priSet,
+      profile: mergedProfile,
+      groupIds: mergedGroupIds,
+      hallVibes: mergedHallVibes,
+      challenge: priSet.challenge || secSet.challenge || null
     };
     // Avoid overwriting an explicit lang/theme with null
     if (mergedSettings.lang == null && secondary.settings && secondary.settings.lang != null) {

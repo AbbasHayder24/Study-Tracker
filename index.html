@@ -45,7 +45,7 @@
   </script>
 
   <!-- 100% local CSS for instant boot -->
-  <link rel="stylesheet" href="css/styles.css?v=68" />
+  <link rel="stylesheet" href="css/styles.css?v=76" />
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen pb-6 transition-colors">
 
@@ -84,14 +84,14 @@
   <div id="app-drawer-backdrop" class="app-drawer-backdrop" aria-hidden="true"></div>
   <aside id="app-drawer" class="app-drawer" aria-hidden="true" aria-label="Navigation Menu">
     <div class="app-drawer-header">
-      <div class="flex items-center gap-2.5 min-w-0">
-        <img src="image.png" alt="Logo" class="w-8 h-8 rounded-xl shrink-0" onerror="this.style.display='none';" />
-        <div class="min-w-0">
+      <button id="app-drawer-profile-btn" type="button" class="drawer-profile-card">
+        <span id="drawer-prof-avatar" class="drawer-prof-avatar">🦉</span>
+        <div class="min-w-0 flex-1 text-start">
           <div id="app-drawer-title" class="text-sm font-extrabold truncate">Study Tracker</div>
-          <div id="app-drawer-subtitle" class="text-[11px] text-slate-500 dark:text-slate-400 truncate">Menu</div>
+          <div id="app-drawer-subtitle" class="text-[11px] text-slate-500 dark:text-slate-400 truncate">View Profile ›</div>
         </div>
-      </div>
-      <button id="app-drawer-close" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 text-lg leading-none" aria-label="Close">×</button>
+      </button>
+      <button id="app-drawer-close" type="button" class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 text-lg leading-none shrink-0" aria-label="Close">×</button>
     </div>
     <nav id="app-drawer-nav" class="app-drawer-nav"></nav>
     <div id="app-drawer-footer" class="app-drawer-footer"></div>
@@ -113,13 +113,13 @@
   </div>
 
   <!-- Core Boot JS Files (Tab modules are lazy-loaded on demand by app.js) -->
-  <script defer src="js/config.js?v=68"></script>
-  <script defer src="js/i18n.js?v=68"></script>
-  <script defer src="js/state.js?v=68"></script>
-  <script defer src="js/google-sync.js?v=68"></script>
-  <script defer src="js/push.js?v=68"></script>
-  <script defer src="js/ledger.js?v=68"></script>
-  <script defer src="js/ui.js?v=68"></script>
-  <script defer src="js/app.js?v=68"></script>
+  <script defer src="js/config.js?v=76"></script>
+  <script defer src="js/i18n.js?v=76"></script>
+  <script defer src="js/state.js?v=76"></script>
+  <script defer src="js/google-sync.js?v=76"></script>
+  <script defer src="js/push.js?v=76"></script>
+  <script defer src="js/ledger.js?v=76"></script>
+  <script defer src="js/ui.js?v=76"></script>
+  <script defer src="js/app.js?v=76"></script>
 </body>
 </html>
