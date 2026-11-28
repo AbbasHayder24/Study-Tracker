@@ -1,10 +1,13 @@
 /**
- * profile.js — Personal Study Profile (v73)
- * Avatar & color customization, Major/Bio, Lifetime Stats, Best Streak, Unlockable Badges & Shareable Card
+ * profile.js — Personal Study Profile + Embedded Settings (v84)
+ * Avatar & color customization, Major/Bio, Lifetime Stats, Best Streak, Unlockable Badges,
+ * Cloud Sync, and full Settings panel nested smoothly inside Profile with animated segmented switcher.
  */
 window.ProfileModule = (function () {
   const AVATARS = ['🦉', '🦊', '🐱', '🩺', '📚', '☕', '🚀', '🌿', '🧠', '⚡', '🎓', '✨'];
   const COLORS = ['#4f46e5', '#1B5E43', '#7C2338', '#0ea5e9', '#d97706', '#7c3aed'];
+  let activeSubTab = 'overview'; // 'overview' | 'settings'
+  let lastRerenderCb = null;
 
   function isAr() {
     return !!(window.I18n && window.I18n.isRTL());
@@ -249,37 +252,11 @@ window.ProfileModule = (function () {
     }
   }
 
-  function render() {
+  function renderOverviewContent(stats, gUser) {
     const ar = isAr();
-    const prof = getProfileData();
-    const stats = computeProfileStats();
-    const gUser = window.GoogleSync && window.GoogleSync.getUser();
     const hUnit = ar ? 'س' : 'h';
-
     return `
       <div class="space-y-4">
-        <!-- Profile Hero Card -->
-        <div class="profile-hero-card" style="--prof-accent:${escapeHtml(prof.color)}">
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex items-center gap-3 min-w-0">
-              <div class="profile-hero-avatar" style="background:${escapeHtml(prof.color)}">${escapeHtml(prof.avatar)}</div>
-              <div class="min-w-0">
-                <div class="flex items-center gap-1.5">
-                  <h2 class="text-base font-extrabold text-slate-800 dark:text-slate-100 truncate">${escapeHtml(prof.name)}</h2>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 shrink-0">${stats.tier.icon} ${ar ? stats.tier.ar : stats.tier.en}</span>
-                </div>
-                ${prof.major ? `<div class="text-xs font-bold text-slate-600 dark:text-slate-300 truncate mt-0.5">${escapeHtml(prof.major)}</div>` : ''}
-                ${gUser && gUser.email ? `<div class="text-[10px] text-slate-400 truncate mt-0.5">☁️ ${escapeHtml(gUser.email)}</div>` : ''}
-              </div>
-            </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <button id="prof-share-btn" type="button" class="w-8 h-8 rounded-xl bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 flex items-center justify-center text-sm" title="${ar ? 'نسخ بطاقة البروفايل' : 'Share Profile'}">📤</button>
-              <button id="prof-edit-btn" type="button" class="px-3 h-8 rounded-xl bg-indigo-600 text-white text-xs font-bold">${ar ? 'تعديل' : 'Edit'}</button>
-            </div>
-          </div>
-          ${prof.bio ? `<p class="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">“${escapeHtml(prof.bio)}”</p>` : ''}
-        </div>
-
         <!-- Google Account & Cloud Sync Card -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200/70 dark:border-slate-700/70 space-y-3">
           ${(() => {
@@ -391,10 +368,47 @@ window.ProfileModule = (function () {
     `;
   }
 
-  function bindEvents(rerender) {
+  function renderSettingsContent() {
     const ar = isAr();
-    const editBtn = document.getElementById('prof-edit-btn');
+    const isDark = window.AppState && window.AppState.getIsDark ? window.AppState.getIsDark() : false;
+    const settingsHtml = window.SettingsModule ? window.SettingsModule.render() : '';
+    return `
+      <div class="space-y-4">
+        <!-- Quick Display & Language Toggles (formerly in Drawer Footer) -->
+        <div class="grid grid-cols-2 gap-2">
+          <button id="prof-quick-theme-btn" type="button" class="py-2.5 px-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
+            <span>${isDark ? '☀️' : '🌙'}</span>
+            <span>${isDark ? (ar ? 'الوضع الفاتح' : 'Light Mode') : (ar ? 'الوضع الداكن' : 'Dark Mode')}</span>
+          </button>
+          <button id="prof-quick-lang-btn" type="button" class="py-2.5 px-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
+            <span>🌐</span>
+            <span>${ar ? 'English' : 'العربية'}</span>
+          </button>
+        </div>
+        ${settingsHtml}
+      </div>
+    `;
+  }
 
+  function updateSubTabIndicator(immediate = false) {
+    const bar = document.getElementById('profile-subtabs-bar');
+    const ind = document.getElementById('profile-subtabs-indicator');
+    if (!bar || !ind) return;
+    const activeBtn = bar.querySelector(`[data-prof-subtab="${activeSubTab}"]`);
+    if (!activeBtn) return;
+
+    if (immediate) ind.classList.add('no-transition');
+    ind.style.width = `${activeBtn.offsetWidth}px`;
+    ind.style.transform = `translate3d(${activeBtn.offsetLeft}px, 0, 0)`;
+    ind.style.opacity = '1';
+    if (immediate) {
+      void ind.offsetWidth;
+      ind.classList.remove('no-transition');
+    }
+  }
+
+  function bindOverviewEvents(rerender) {
+    const ar = isAr();
     const gSignInBtn = document.getElementById('prof-google-signin');
     if (gSignInBtn && window.GoogleSync) {
       gSignInBtn.onclick = async () => {
@@ -447,7 +461,121 @@ window.ProfileModule = (function () {
         });
       };
     }
+  }
 
+  function bindSettingsEvents(rerender) {
+    const themeBtn = document.getElementById('prof-quick-theme-btn');
+    if (themeBtn) {
+      themeBtn.onclick = () => {
+        window.AppState.toggleTheme();
+        if (rerender) rerender();
+      };
+    }
+    const langBtn = document.getElementById('prof-quick-lang-btn');
+    if (langBtn) {
+      langBtn.onclick = () => {
+        window.I18n.toggleLang();
+        window.AppState.markLedgerDirty();
+        if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
+      };
+    }
+    if (window.SettingsModule && window.SettingsModule.bindEvents) {
+      window.SettingsModule.bindEvents(rerender);
+    }
+  }
+
+  function setSubTab(nextSub, animate = true) {
+    if (nextSub !== 'overview' && nextSub !== 'settings') return;
+    const prevSub = activeSubTab;
+    activeSubTab = nextSub;
+
+    const bar = document.getElementById('profile-subtabs-bar');
+    const contentEl = document.getElementById('profile-subtab-content');
+    if (!bar || !contentEl) return;
+
+    bar.querySelectorAll('[data-prof-subtab]').forEach(btn => {
+      const isAct = btn.getAttribute('data-prof-subtab') === activeSubTab;
+      btn.classList.toggle('is-active', isAct);
+      btn.setAttribute('aria-selected', isAct ? 'true' : 'false');
+    });
+    updateSubTabIndicator(!animate);
+
+    if (prevSub === nextSub && contentEl.children.length) return;
+
+    const stats = computeProfileStats();
+    const gUser = window.GoogleSync && window.GoogleSync.getUser();
+    contentEl.innerHTML = activeSubTab === 'settings'
+      ? renderSettingsContent()
+      : renderOverviewContent(stats, gUser);
+
+    if (animate) {
+      contentEl.classList.remove('tab-slide-next', 'tab-slide-prev', 'tab-animate');
+      void contentEl.offsetWidth;
+      contentEl.classList.add(activeSubTab === 'settings' ? 'tab-slide-next' : 'tab-slide-prev');
+    }
+
+    if (activeSubTab === 'settings') {
+      bindSettingsEvents(lastRerenderCb);
+    } else {
+      bindOverviewEvents(lastRerenderCb);
+    }
+  }
+
+  function render() {
+    const ar = isAr();
+    const prof = getProfileData();
+    const stats = computeProfileStats();
+    const gUser = window.GoogleSync && window.GoogleSync.getUser();
+
+    return `
+      <div class="space-y-4">
+        <!-- Profile Hero Card -->
+        <div class="profile-hero-card" style="--prof-accent:${escapeHtml(prof.color)}">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="profile-hero-avatar" style="background:${escapeHtml(prof.color)}">${escapeHtml(prof.avatar)}</div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <h2 class="text-base font-extrabold text-slate-800 dark:text-slate-100 truncate">${escapeHtml(prof.name)}</h2>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 shrink-0">${stats.tier.icon} ${ar ? stats.tier.ar : stats.tier.en}</span>
+                </div>
+                ${prof.major ? `<div class="text-xs font-bold text-slate-600 dark:text-slate-300 truncate mt-0.5">${escapeHtml(prof.major)}</div>` : ''}
+                ${gUser && gUser.email ? `<div class="text-[10px] text-slate-400 truncate mt-0.5">☁️ ${escapeHtml(gUser.email)}</div>` : ''}
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button id="prof-share-btn" type="button" class="w-8 h-8 rounded-xl bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 flex items-center justify-center text-sm" title="${ar ? 'نسخ بطاقة البروفايل' : 'Share Profile'}">📤</button>
+              <button id="prof-edit-btn" type="button" class="px-3 h-8 rounded-xl bg-indigo-600 text-white text-xs font-bold">${ar ? 'تعديل' : 'Edit'}</button>
+            </div>
+          </div>
+          ${prof.bio ? `<p class="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">“${escapeHtml(prof.bio)}”</p>` : ''}
+        </div>
+
+        <!-- Profile / Settings Sliding Segmented Switcher -->
+        <div id="profile-subtabs-bar" class="profile-subtabs" role="tablist">
+          <div id="profile-subtabs-indicator" class="profile-subtabs-indicator" aria-hidden="true"></div>
+          <button type="button" role="tab" data-prof-subtab="overview" aria-selected="${activeSubTab === 'overview' ? 'true' : 'false'}" class="profile-subtab-btn ${activeSubTab === 'overview' ? 'is-active' : ''}">
+            <span>👤</span>
+            <span>${ar ? 'ملفي والأوسمة' : 'Overview'}</span>
+          </button>
+          <button type="button" role="tab" data-prof-subtab="settings" aria-selected="${activeSubTab === 'settings' ? 'true' : 'false'}" class="profile-subtab-btn ${activeSubTab === 'settings' ? 'is-active' : ''}">
+            <span>⚙️</span>
+            <span>${ar ? 'الإعدادات' : 'Settings'}</span>
+          </button>
+        </div>
+
+        <!-- Active Sub-Tab Body -->
+        <div id="profile-subtab-content">
+          ${activeSubTab === 'settings' ? renderSettingsContent() : renderOverviewContent(stats, gUser)}
+        </div>
+      </div>
+    `;
+  }
+
+  function bindEvents(rerender) {
+    lastRerenderCb = rerender;
+    const ar = isAr();
+    const editBtn = document.getElementById('prof-edit-btn');
     if (editBtn) editBtn.onclick = () => openEditProfileModal(rerender);
 
     const shareBtn = document.getElementById('prof-share-btn');
@@ -468,12 +596,32 @@ window.ProfileModule = (function () {
         }
       };
     }
+
+    const bar = document.getElementById('profile-subtabs-bar');
+    if (bar) {
+      bar.querySelectorAll('[data-prof-subtab]').forEach(btn => {
+        btn.onclick = () => {
+          const next = btn.getAttribute('data-prof-subtab');
+          if (next && next !== activeSubTab) {
+            setSubTab(next, true);
+          }
+        };
+      });
+      requestAnimationFrame(() => updateSubTabIndicator(true));
+    }
+
+    if (activeSubTab === 'settings') {
+      bindSettingsEvents(rerender);
+    } else {
+      bindOverviewEvents(rerender);
+    }
   }
 
   return {
     render,
     bindEvents,
     getProfileData,
-    computeProfileStats
+    computeProfileStats,
+    setSubTab
   };
 })();

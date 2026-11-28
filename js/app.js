@@ -1,19 +1,19 @@
 /**
- * app.js — Main entry point: Focus as main home screen, hamburger slide-out drawer for secondary views,
- * modern uncluttered header, drawer preference footer, lazy-loaded tab modules, scoped tab re-rendering
+ * app.js — Main entry point (v84):
+ * Profile avatar at top header, Settings nested inside Profile,
+ * 4 floating glass bottom tabs (Focus, Hall, Stats, Plan) with sliding pill indicator & directional animations
  */
 window.StudyApp = (function () {
-  const ASSET_VER = '81';
+  const ASSET_VER = '85';
   const TABS = [
     { id: 'focus', key: 'tab_focus', icon: '📚' },
     { id: 'hall', key: 'tab_hall', icon: '🏛️' },
     { id: 'stats', key: 'tab_stats', icon: '📈' },
     { id: 'challenge', key: 'tab_challenge', icon: '🎯' },
-    { id: 'settings', key: 'tab_settings', icon: '⚙️' },
     { id: 'profile', key: 'tab_profile', icon: '👤' }
   ];
-  // Secondary views shown inside the ☰ drawer (Focus is the home screen returned to on exit)
-  const DRAWER_TABS = TABS.filter(tb => tb.id !== 'focus' && tb.id !== 'profile');
+  // 4 primary tabs displayed in the floating bottom tab bar
+  const BOTTOM_TABS = TABS.filter(tb => tb.id !== 'profile');
 
   // Each tab loads only the scripts it needs on first visit
   const TAB_SCRIPTS = {
@@ -21,15 +21,18 @@ window.StudyApp = (function () {
     hall: ['js/groups.js', 'js/bookshelf.js', 'js/focus.js'],
     stats: ['js/stats.js'],
     challenge: ['js/reviews.js', 'js/challenge.js'],
-    settings: ['js/reviews.js', 'js/challenge.js', 'js/settings.js'],
-    profile: ['js/profile.js']
+    profile: ['js/reviews.js', 'js/challenge.js', 'js/settings.js', 'js/profile.js']
   };
 
   const scriptPromises = {};
   let lastHeaderSig = "";
-  let lastNavLang = "";
+  let lastNavSig = "";
   let renderSeq = 0;
-  let drawerOpen = false;
+  let lastBottomTab = 'focus';
+  let pendingTransition = 'fade'; // 'next' | 'prev' | 'down' | 'up' | 'fade'
+  let resizeRaf = 0;
+  let isBottomNavScrubbing = false;
+  let lastScrubEndAt = 0;
 
   function t(key, vars) {
     return window.I18n ? window.I18n.t(key, vars) : key;
@@ -83,29 +86,45 @@ window.StudyApp = (function () {
     }
   }
 
-  function setDrawerOpen(open) {
-    drawerOpen = !!open;
-    const drawer = document.getElementById('app-drawer');
-    const backdrop = document.getElementById('app-drawer-backdrop');
-    const menuBtn = document.getElementById('app-menu-btn');
-    if (drawer) {
-      drawer.classList.toggle('is-open', drawerOpen);
-      drawer.setAttribute('aria-hidden', drawerOpen ? 'false' : 'true');
+  function computeTransitionDir(prevTab, nextTab) {
+    if (!prevTab || prevTab === nextTab) return 'fade';
+    if (nextTab === 'profile') return 'down';
+    if (prevTab === 'profile') return 'up';
+    const prevIdx = BOTTOM_TABS.findIndex(tb => tb.id === prevTab);
+    const nextIdx = BOTTOM_TABS.findIndex(tb => tb.id === nextTab);
+    if (prevIdx !== -1 && nextIdx !== -1) {
+      return nextIdx > prevIdx ? 'next' : 'prev';
     }
-    if (backdrop) {
-      backdrop.classList.toggle('is-open', drawerOpen);
-      backdrop.setAttribute('aria-hidden', drawerOpen ? 'false' : 'true');
-    }
-    if (menuBtn) {
-      menuBtn.setAttribute('aria-expanded', drawerOpen ? 'true' : 'false');
-    }
-    document.body.classList.toggle('drawer-open', drawerOpen);
+    return 'fade';
   }
 
-  function switchTab(nextTab) {
-    setDrawerOpen(false);
+  function switchTab(nextTab, opts = {}) {
     if (!nextTab) return;
-    if (nextTab === window.AppState.getActiveTab()) return;
+
+    // Route legacy 'settings' calls directly into Profile -> Settings sub-tab
+    if (nextTab === 'settings') {
+      nextTab = 'profile';
+      opts = Object.assign({}, opts, { profileSubTab: 'settings' });
+    }
+
+    const currentTab = window.AppState.getActiveTab();
+    if (opts && opts.profileSubTab && window.ProfileModule && window.ProfileModule.setSubTab) {
+      if (currentTab === 'profile') {
+        window.ProfileModule.setSubTab(opts.profileSubTab, true);
+        return;
+      }
+      window.ProfileModule.setSubTab(opts.profileSubTab, false);
+    } else if (opts && opts.profileSubTab) {
+      window.__pendingProfileSubTab = opts.profileSubTab;
+    }
+
+    if (nextTab === currentTab) return;
+
+    if (BOTTOM_TABS.some(tb => tb.id === nextTab)) {
+      lastBottomTab = nextTab;
+    }
+
+    pendingTransition = computeTransitionDir(currentTab, nextTab);
     window.AppState.setActiveTab(nextTab);
     renderHeader();
     renderNav();
@@ -119,41 +138,61 @@ window.StudyApp = (function () {
     const isAr = window.I18n && window.I18n.isRTL();
     const hUnit = t('hrs');
     const active = window.AppState.getActiveTab();
-    const isHome = active === 'focus';
+    const isProfile = active === 'profile';
 
     const backBtn = document.getElementById('app-back-btn');
     const logoEl = document.getElementById('app-header-logo');
     const logoFallback = document.getElementById('logo-fallback');
-    const menuBtn = document.getElementById('app-menu-btn');
     const titleEl = document.getElementById('app-header-title');
+    const profBtn = document.getElementById('app-header-profile-btn');
+    const profAvEl = document.getElementById('header-prof-avatar');
 
-    // Modern mobile app bar: Home shows ☰ + Logo + Title; Secondary views show Back + Section Title
+    // Top bar: Profile view shows Back + Profile title; bottom tabs show Logo + Title
     if (backBtn) {
-      backBtn.classList.toggle('hidden', isHome);
-      backBtn.title = isAr ? 'العودة إلى التركيز' : 'Back to Focus';
+      backBtn.classList.toggle('hidden', !isProfile);
+      backBtn.title = isAr ? 'رجوع' : 'Back';
       backBtn.setAttribute('aria-label', backBtn.title);
-      backBtn.onclick = () => switchTab('focus');
-    }
-    if (menuBtn) {
-      menuBtn.classList.toggle('hidden', !isHome);
-      menuBtn.title = isAr ? 'القائمة' : 'Menu';
-      menuBtn.setAttribute('aria-label', menuBtn.title);
-      menuBtn.onclick = () => setDrawerOpen(!drawerOpen);
+      backBtn.onclick = () => switchTab(lastBottomTab || 'focus');
     }
     if (logoEl) {
-      logoEl.classList.toggle('hidden', !isHome);
+      logoEl.classList.toggle('hidden', isProfile);
     }
-    if (logoFallback && !isHome) {
+    if (logoFallback && isProfile) {
       logoFallback.classList.add('hidden');
     }
     if (titleEl) {
-      if (isHome) {
+      if (active === 'focus') {
         titleEl.textContent = t('appTitle');
       } else {
         const activeObj = TABS.find(tb => tb.id === active);
         const iconPrefix = activeObj ? `${activeObj.icon} ` : '';
         titleEl.textContent = iconPrefix + getTabDisplayLabel(active);
       }
+    }
+
+    // Top Profile Avatar Button
+    const dataNow = window.AppState.getData();
+    const profObj = (dataNow && dataNow.settings && dataNow.settings.profile) || {};
+    const profAvatar = profObj.avatar || '🦉';
+    const profColor = profObj.color || '#4f46e5';
+
+    if (profAvEl) {
+      profAvEl.textContent = profAvatar;
+      profAvEl.style.background = profColor;
+    }
+    if (profBtn) {
+      profBtn.classList.toggle('is-active', isProfile);
+      const profLabel = isAr ? 'البروفايل والإعدادات' : 'Profile & Settings';
+      profBtn.title = profLabel;
+      profBtn.setAttribute('aria-label', profLabel);
+      profBtn.setAttribute('aria-pressed', isProfile ? 'true' : 'false');
+      profBtn.onclick = () => {
+        if (window.AppState.getActiveTab() === 'profile') {
+          switchTab(lastBottomTab || 'focus');
+        } else {
+          switchTab('profile');
+        }
+      };
     }
 
     const syncIcon = syncStatus.state === 'syncing' ? '🔄' : (syncStatus.state === 'error' ? '⚠️' : '☁️');
@@ -189,107 +228,86 @@ window.StudyApp = (function () {
     }
   }
 
-  function renderDrawerFooter() {
-    const footerEl = document.getElementById('app-drawer-footer');
-    if (!footerEl) return;
-    const isDark = window.AppState.getIsDark();
-    const isAr = !!(window.I18n && window.I18n.isRTL());
+  function updateBottomNavIndicator(immediate = false) {
+    if (isBottomNavScrubbing) return;
+    const itemsEl = document.getElementById('bottom-nav-items');
+    const indicator = document.getElementById('bottom-nav-indicator');
+    if (!itemsEl || !indicator) return;
 
-    footerEl.innerHTML = `
-      <button id="drawer-theme-btn" type="button" class="drawer-pref-btn" title="${window.AppUI.escapeHtml(t('toggleThemeTitle'))}">
-        <span>${isDark ? '☀️' : '🌙'}</span>
-        <span>${isDark ? (isAr ? 'فاتح' : 'Light') : (isAr ? 'داكن' : 'Dark')}</span>
-      </button>
-      <button id="drawer-lang-btn" type="button" class="drawer-pref-btn" title="${window.AppUI.escapeHtml(t('toggleLangTitle'))}">
-        <span>🌐</span>
-        <span>${isAr ? 'English' : 'العربية'}</span>
-      </button>
-    `;
-
-    const themeBtn = document.getElementById('drawer-theme-btn');
-    if (themeBtn) {
-      themeBtn.onclick = () => {
-        window.AppState.toggleTheme();
-        renderDrawerFooter();
-      };
+    const active = window.AppState.getActiveTab();
+    const activeBtn = itemsEl.querySelector(`.bottom-nav-btn[data-tab-id="${active}"]`);
+    if (!activeBtn) {
+      indicator.style.opacity = '0';
+      return;
     }
-    const langBtn = document.getElementById('drawer-lang-btn');
-    if (langBtn) {
-      langBtn.onclick = () => {
-        window.I18n.toggleLang();
-        window.AppState.markLedgerDirty();
-        renderAll();
-      };
+
+    const left = activeBtn.offsetLeft;
+    const width = activeBtn.offsetWidth;
+    if (width <= 0) return;
+
+    if (immediate) {
+      indicator.classList.add('no-transition');
+    }
+    indicator.style.width = `${width}px`;
+    indicator.style.transform = `translate3d(${left}px, 0, 0)`;
+    indicator.style.opacity = '1';
+    if (immediate) {
+      void indicator.offsetWidth;
+      indicator.classList.remove('no-transition');
     }
   }
 
   function renderNav() {
     const active = window.AppState.getActiveTab();
-    const navEl = document.getElementById('app-drawer-nav');
-    if (!navEl) return;
+    const itemsEl = document.getElementById('bottom-nav-items');
+    if (!itemsEl) return;
 
     const isAr = !!(window.I18n && window.I18n.isRTL());
     const curLang = isAr ? 'ar' : 'en';
     const planLabel = getTabDisplayLabel('challenge');
-
-    const dataNow = window.AppState.getData();
-    const profObj = (dataNow && dataNow.settings && dataNow.settings.profile) || {};
-    const gUser = window.GoogleSync && window.GoogleSync.getUser();
-    const profAvatar = profObj.avatar || '🦉';
-    const profColor = profObj.color || '#4f46e5';
-    const profName = (profObj.name && String(profObj.name).trim())
-      || (dataNow && dataNow.settings && dataNow.settings.groupNickname)
-      || (gUser && (gUser.displayName || (gUser.email ? gUser.email.split('@')[0] : '')))
-      || t('appTitle');
-    const profSub = (profObj.major && String(profObj.major).trim())
-      || (isAr ? 'عرض البروفايل والأوسمة ›' : 'View profile & badges ›');
-
-    const avEl = document.getElementById('drawer-prof-avatar');
-    if (avEl) {
-      avEl.textContent = profAvatar;
-      avEl.style.background = profColor;
-    }
-    const drawerTitle = document.getElementById('app-drawer-title');
-    if (drawerTitle) drawerTitle.textContent = profName;
-    const drawerSub = document.getElementById('app-drawer-subtitle');
-    if (drawerSub) drawerSub.textContent = profSub;
-    const profBtn = document.getElementById('app-drawer-profile-btn');
-    if (profBtn) {
-      profBtn.classList.toggle('is-active', active === 'profile');
-      profBtn.onclick = () => switchTab('profile');
-    }
-
     const navSig = `${curLang}|${planLabel}`;
-    if (!navEl.children.length || lastNavLang !== navSig) {
-      lastNavLang = navSig;
-      navEl.innerHTML = DRAWER_TABS.map(tab => {
+    const rebuilt = !itemsEl.children.length || lastNavSig !== navSig;
+
+    if (rebuilt) {
+      lastNavSig = navSig;
+      itemsEl.innerHTML = BOTTOM_TABS.map(tab => {
         const label = tab.id === 'challenge' ? planLabel : t(tab.key);
         return `
-          <button type="button" data-tab-id="${tab.id}" class="drawer-nav-item">
-            <span class="drawer-nav-icon">${tab.icon}</span>
-            <span class="drawer-nav-label">${window.AppUI.escapeHtml(label)}</span>
-            <span class="drawer-nav-dot" aria-hidden="true"></span>
+          <button type="button" data-tab-id="${tab.id}" class="bottom-nav-btn" aria-label="${window.AppUI.escapeHtml(label)}">
+            <span class="bottom-nav-icon" aria-hidden="true">${tab.icon}</span>
+            <span class="bottom-nav-label">${window.AppUI.escapeHtml(label)}</span>
           </button>
         `;
       }).join('');
 
-      navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
+      itemsEl.querySelectorAll('.bottom-nav-btn').forEach(btn => {
         btn.onclick = () => {
+          if (Date.now() - lastScrubEndAt < 120) return;
           const nextTab = btn.getAttribute('data-tab-id');
           switchTab(nextTab);
         };
       });
     }
 
-    navEl.querySelectorAll('[data-tab-id]').forEach(btn => {
+    itemsEl.querySelectorAll('.bottom-nav-btn').forEach(btn => {
       const isAct = btn.getAttribute('data-tab-id') === active;
+      const wasAct = btn.classList.contains('is-active');
       btn.classList.toggle('is-active', isAct);
+      btn.setAttribute('aria-current', isAct ? 'page' : 'false');
+      if (isAct && !wasAct) {
+        const iconEl = btn.querySelector('.bottom-nav-icon');
+        if (iconEl) {
+          iconEl.classList.remove('is-popping');
+          void iconEl.offsetWidth;
+          iconEl.classList.add('is-popping');
+        }
+      }
     });
 
-    renderDrawerFooter();
+    requestAnimationFrame(() => updateBottomNavIndicator(rebuilt));
   }
 
-  const tabDirty = { focus: true, hall: true, stats: true, challenge: true, settings: true, profile: true };
+  const tabDirty = { focus: true, hall: true, stats: true, challenge: true, profile: true };
   const tabScrollY = {};
   let currentMountedTab = null;
   let lastDataUpdatedAt = 0;
@@ -310,9 +328,20 @@ window.StudyApp = (function () {
     if (tabId === 'hall') return !!window.GroupsModule;
     if (tabId === 'stats') return !!window.StatsModule;
     if (tabId === 'challenge') return !!(window.ChallengeModule && window.ReviewsModule);
-    if (tabId === 'settings') return !!(window.SettingsModule && window.ChallengeModule);
-    if (tabId === 'profile') return !!window.ProfileModule;
+    if (tabId === 'profile') return !!(window.ProfileModule && window.SettingsModule && window.ChallengeModule);
     return true;
+  }
+
+  function applyPanelTransition(panel, dir) {
+    if (!panel) return;
+    panel.classList.remove('tab-animate', 'tab-slide-next', 'tab-slide-prev', 'tab-slide-down', 'tab-slide-up');
+    const cls = dir === 'next' ? 'tab-slide-next'
+      : dir === 'prev' ? 'tab-slide-prev'
+      : dir === 'down' ? 'tab-slide-down'
+      : dir === 'up' ? 'tab-slide-up'
+      : 'tab-animate';
+    void panel.offsetWidth;
+    panel.classList.add(cls);
   }
 
   // Scoped re-render: only rebuilds the active tab, and only marks other tabs dirty if state actually changed
@@ -322,7 +351,7 @@ window.StudyApp = (function () {
     const curLang = window.I18n ? (window.I18n.isRTL() ? 'ar' : 'en') : 'en';
     const planLabel = getTabDisplayLabel('challenge');
     const navSig = `${curLang}|${planLabel}`;
-    if (nowTs !== lastDataUpdatedAt || navSig !== lastNavLang) {
+    if (nowTs !== lastDataUpdatedAt || navSig !== lastNavSig) {
       markAllTabsDirty(active);
       lastDataUpdatedAt = nowTs;
     }
@@ -401,7 +430,16 @@ window.StudyApp = (function () {
   }
 
   function renderMain(animate = false, forceCurrent = false) {
-    const active = window.AppState.getActiveTab();
+    let active = window.AppState.getActiveTab();
+    if (active === 'settings') {
+      active = 'profile';
+      window.AppState.setActiveTab('profile');
+      window.__pendingProfileSubTab = 'settings';
+    }
+    if (BOTTOM_TABS.some(tb => tb.id === active)) {
+      lastBottomTab = active;
+    }
+
     const mainEl = document.getElementById('app-main');
     if (!mainEl) return;
     ensureTabPanels(mainEl);
@@ -432,6 +470,10 @@ window.StudyApp = (function () {
         }
         ensureTabLoaded(active).then(() => {
           if (mySeq !== renderSeq || window.AppState.getActiveTab() !== active) return;
+          if (active === 'profile' && window.__pendingProfileSubTab && window.ProfileModule && window.ProfileModule.setSubTab) {
+            window.ProfileModule.setSubTab(window.__pendingProfileSubTab, false);
+            window.__pendingProfileSubTab = null;
+          }
           renderMain(animate, true);
         }).catch(() => {
           if (mySeq !== renderSeq) return;
@@ -441,13 +483,17 @@ window.StudyApp = (function () {
         return;
       }
 
+      if (active === 'profile' && window.__pendingProfileSubTab && window.ProfileModule && window.ProfileModule.setSubTab) {
+        window.ProfileModule.setSubTab(window.__pendingProfileSubTab, false);
+        window.__pendingProfileSubTab = null;
+      }
+
       lastDataUpdatedAt = (window.AppState.getData() && window.AppState.getData().updatedAt) || 0;
       let html = '';
       if (active === 'focus') html = window.FocusModule.render();
       else if (active === 'hall') html = window.GroupsModule.render();
       else if (active === 'stats') html = window.StatsModule.render();
       else if (active === 'challenge') html = window.ChallengeModule.render();
-      else if (active === 'settings') html = window.SettingsModule.render();
       else if (active === 'profile') html = window.ProfileModule.render();
 
       activePanel.innerHTML = html;
@@ -458,13 +504,12 @@ window.StudyApp = (function () {
       else if (active === 'hall') window.GroupsModule.bindEvents(scopedCb);
       else if (active === 'stats') window.StatsModule.bindEvents(scopedCb);
       else if (active === 'challenge') window.ChallengeModule.bindEvents(scopedCb);
-      else if (active === 'settings') window.SettingsModule.bindEvents(scopedCb);
       else if (active === 'profile') window.ProfileModule.bindEvents(scopedCb);
     }
 
     if (animate && currentMountedTab !== active) {
-      activePanel.classList.remove('tab-animate');
-      requestAnimationFrame(() => activePanel.classList.add('tab-animate'));
+      applyPanelTransition(activePanel, pendingTransition);
+      pendingTransition = 'fade';
       const savedY = tabScrollY[active] || 0;
       window.scrollTo(0, savedY);
     }
@@ -514,6 +559,7 @@ window.StudyApp = (function () {
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
       window.AppState.setActiveTab('hall');
+      lastBottomTab = 'hall';
     } catch (e) {}
   }
 
@@ -536,6 +582,175 @@ window.StudyApp = (function () {
     }, 120);
   }
 
+  function bindBottomNavScrubbing() {
+    const track = document.getElementById('bottom-nav-track');
+    if (!track || track.__scrubBound) return;
+    track.__scrubBound = true;
+
+    let activePointerId = null;
+    let startX = 0;
+    let movedEnough = false;
+    let lastHoveredTab = null;
+
+    function findClosestTabBtn(clientX) {
+      const itemsEl = document.getElementById('bottom-nav-items');
+      if (!itemsEl) return null;
+      const btns = Array.from(itemsEl.querySelectorAll('.bottom-nav-btn'));
+      if (!btns.length) return null;
+      let best = btns[0];
+      let bestDist = Infinity;
+      for (const btn of btns) {
+        const r = btn.getBoundingClientRect();
+        const center = (r.left + r.right) / 2;
+        const d = Math.abs(clientX - center);
+        if (d < bestDist) {
+          bestDist = d;
+          best = btn;
+        }
+      }
+      return best;
+    }
+
+    function movePillToClientX(clientX) {
+      const itemsEl = document.getElementById('bottom-nav-items');
+      const indicator = document.getElementById('bottom-nav-indicator');
+      if (!itemsEl || !indicator) return;
+      const itemsRect = itemsEl.getBoundingClientRect();
+      const btns = itemsEl.querySelectorAll('.bottom-nav-btn');
+      if (!btns.length || itemsRect.width <= 0) return;
+
+      const pillWidth = btns[0].offsetWidth || (itemsRect.width / btns.length);
+      const maxLeft = Math.max(0, itemsRect.width - pillWidth);
+      const relX = clientX - itemsRect.left - (pillWidth / 2);
+      const clampedX = Math.max(0, Math.min(maxLeft, relX));
+
+      indicator.classList.add('no-transition');
+      indicator.style.width = `${pillWidth}px`;
+      indicator.style.transform = `translate3d(${clampedX}px, 0, 0) scale(1.04)`;
+      indicator.style.opacity = '1';
+    }
+
+    function finishScrub() {
+      if (activePointerId === null) return;
+      const wasScrubbing = isBottomNavScrubbing;
+      activePointerId = null;
+      isBottomNavScrubbing = false;
+      movedEnough = false;
+      lastHoveredTab = null;
+
+      track.classList.remove('is-scrubbing');
+      const indicator = document.getElementById('bottom-nav-indicator');
+      if (indicator) {
+        indicator.classList.remove('no-transition');
+      }
+      if (wasScrubbing) {
+        lastScrubEndAt = Date.now();
+        requestAnimationFrame(() => updateBottomNavIndicator(false));
+      }
+    }
+
+    track.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (document.body.classList.contains('zen-mode-active')) return;
+      activePointerId = e.pointerId;
+      startX = e.clientX;
+      movedEnough = false;
+      lastHoveredTab = window.AppState.getActiveTab();
+      try { track.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    track.addEventListener('pointermove', (e) => {
+      if (activePointerId === null || e.pointerId !== activePointerId) return;
+      const dx = Math.abs(e.clientX - startX);
+      if (!movedEnough && dx < 8) return;
+
+      if (!movedEnough) {
+        movedEnough = true;
+        isBottomNavScrubbing = true;
+        track.classList.add('is-scrubbing');
+      }
+
+      movePillToClientX(e.clientX);
+      const closestBtn = findClosestTabBtn(e.clientX);
+      if (closestBtn) {
+        const nextTab = closestBtn.getAttribute('data-tab-id');
+        if (nextTab && nextTab !== lastHoveredTab) {
+          lastHoveredTab = nextTab;
+          if (navigator.vibrate) {
+            try { navigator.vibrate(8); } catch (err) {}
+          }
+          switchTab(nextTab);
+        }
+      }
+    });
+
+    track.addEventListener('pointerup', (e) => {
+      if (activePointerId !== null && e.pointerId === activePointerId) {
+        try { track.releasePointerCapture(e.pointerId); } catch (err) {}
+        finishScrub();
+      }
+    });
+
+    track.addEventListener('pointercancel', (e) => {
+      if (activePointerId !== null && e.pointerId === activePointerId) {
+        finishScrub();
+      }
+    });
+  }
+
+  function bindTabSwipeNavigation() {
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    document.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length !== 1) { tracking = false; return; }
+      if (document.body.classList.contains('zen-mode-active')) { tracking = false; return; }
+      const modal = document.getElementById('app-modal-backdrop');
+      if (modal && !modal.classList.contains('hidden')) { tracking = false; return; }
+
+      const active = window.AppState.getActiveTab();
+      if (active === 'profile') { tracking = false; return; }
+
+      const target = e.target;
+      if (target && target.closest && (
+        target.closest('#focus-dial-container') ||
+        target.closest('.overflow-x-auto') ||
+        target.closest('#app-bottom-nav') ||
+        target.closest('input, textarea, select, button')
+      )) {
+        tracking = false;
+        return;
+      }
+
+      const t0 = e.touches[0];
+      startX = t0.clientX;
+      startY = t0.clientY;
+      tracking = true;
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+      if (!tracking || !e.changedTouches || !e.changedTouches.length) return;
+      tracking = false;
+      const t1 = e.changedTouches[0];
+      const dx = t1.clientX - startX;
+      const dy = t1.clientY - startY;
+      if (Math.abs(dx) < 68 || Math.abs(dy) > Math.abs(dx) * 0.65) return;
+
+      const active = window.AppState.getActiveTab();
+      const idx = BOTTOM_TABS.findIndex(tb => tb.id === active);
+      if (idx === -1) return;
+
+      const isRtl = document.documentElement.dir === 'rtl';
+      // In LTR: swipe left (dx < 0) -> next tab; in RTL: swipe right (dx > 0) -> next tab
+      const step = isRtl ? (dx > 0 ? 1 : -1) : (dx < 0 ? 1 : -1);
+      const targetIdx = idx + step;
+      if (targetIdx >= 0 && targetIdx < BOTTOM_TABS.length) {
+        switchTab(BOTTOM_TABS[targetIdx].id);
+      }
+    }, { passive: true });
+  }
+
   function init() {
     window.AppState.initThemeAndTelegram();
     window.AppState.load();
@@ -549,25 +764,20 @@ window.StudyApp = (function () {
       });
     }
 
-    const drawerBackdrop = document.getElementById('app-drawer-backdrop');
-    if (drawerBackdrop) {
-      drawerBackdrop.addEventListener('click', () => setDrawerOpen(false));
-    }
-    const drawerClose = document.getElementById('app-drawer-close');
-    if (drawerClose) {
-      drawerClose.addEventListener('click', () => setDrawerOpen(false));
-    }
+    bindBottomNavScrubbing();
+    bindTabSwipeNavigation();
+
+    window.addEventListener('resize', () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => updateBottomNavIndicator(true));
+    });
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (drawerOpen) {
-        setDrawerOpen(false);
-        return;
-      }
       const modal = document.getElementById('app-modal-backdrop');
       if (modal && !modal.classList.contains('hidden')) return;
-      if (window.AppState.getActiveTab() !== 'focus') {
-        switchTab('focus');
+      if (window.AppState.getActiveTab() === 'profile') {
+        switchTab(lastBottomTab || 'focus');
       }
     });
 
@@ -600,7 +810,7 @@ window.StudyApp = (function () {
     renderAll,
     renderHeader,
     switchTab,
-    closeDrawer: () => setDrawerOpen(false),
+    closeDrawer: () => {},
     markOtherTabsDirty: () => markAllTabsDirty(window.AppState.getActiveTab())
   };
 })();

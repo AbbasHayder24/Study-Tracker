@@ -255,7 +255,7 @@ window.SettingsModule = (function () {
     const openProfBtn = document.getElementById('setting-open-profile-sync');
     if (openProfBtn) {
       openProfBtn.onclick = () => {
-        if (window.StudyApp && window.StudyApp.switchTab) window.StudyApp.switchTab('profile');
+        if (window.ProfileModule && window.ProfileModule.setSubTab) window.ProfileModule.setSubTab('overview', true); else if (window.StudyApp && window.StudyApp.switchTab) window.StudyApp.switchTab('profile');
       };
     }
     const gSignInBtn = document.getElementById('setting-google-signin');
