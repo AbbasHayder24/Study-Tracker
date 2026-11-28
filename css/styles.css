@@ -1413,3 +1413,431 @@ input[type="file"]::file-selector-button {
 .pt-2\.5 { padding-top: 0.625rem; }
 .shadow-md { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14); }
 .tracking-wide { letter-spacing: 0.025em; }
+
+/* v83 Floating Glass Menu aligned flush with the ☰ button on iPhone & iPad */
+.app-drawer {
+  top: calc(env(safe-area-inset-top, 0px) + 62px);
+  bottom: auto;
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 78px);
+  left: 16px;
+  right: auto;
+  width: 272px;
+  max-width: calc(100vw - 32px);
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.11);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-10px) scale(0.97);
+  transform-origin: top left;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
+}
+html[dir="rtl"] .app-drawer {
+  left: auto;
+  right: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.11);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+  transform: translateY(-10px) scale(0.97);
+  transform-origin: top right;
+}
+.app-drawer.is-open,
+html[dir="rtl"] .app-drawer.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+@media (min-width: 768px) {
+  .app-drawer {
+    left: max(16px, calc((100vw - 56rem) / 2 + 16px));
+  }
+  html[dir="rtl"] .app-drawer {
+    left: auto;
+    right: max(16px, calc((100vw - 56rem) / 2 + 16px));
+  }
+}
+
+/* ==========================================================================
+   v84 Top Profile Button, Embedded Settings Switcher, Floating Glass Bottom Tabs
+   & Smooth Directional Tab Transitions
+   ========================================================================== */
+
+body.has-bottom-nav {
+  padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+}
+body.zen-mode-active.has-bottom-nav {
+  padding-bottom: 0;
+}
+body.zen-mode-active #app-bottom-nav {
+  display: none !important;
+}
+
+/* 1. Top Header Profile Avatar Button */
+.header-profile-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 2px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1.5px solid rgba(148, 163, 184, 0.34);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+.dark .header-profile-btn {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 244, 222, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.header-profile-btn:active {
+  transform: scale(0.9);
+}
+.header-profile-btn.is-active {
+  border-color: #1E3A5F;
+  box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.18), 0 4px 14px rgba(30, 58, 95, 0.22);
+  transform: scale(1.06);
+}
+.dark .header-profile-btn.is-active {
+  border-color: #C9A24D;
+  box-shadow: 0 0 0 3px rgba(201, 162, 77, 0.25), 0 4px 16px rgba(201, 162, 77, 0.24);
+}
+html[data-palette="oxford"] .header-profile-btn.is-active {
+  border-color: #1B5E43;
+  box-shadow: 0 0 0 3px rgba(27, 94, 67, 0.2);
+}
+html[data-palette="burgundy"] .header-profile-btn.is-active {
+  border-color: #7C2338;
+  box-shadow: 0 0 0 3px rgba(124, 35, 56, 0.2);
+}
+.header-prof-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  color: #ffffff;
+  background: #4f46e5;
+}
+
+/* 2. Floating Liquid Glass Bottom Tab Bar */
+.app-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+}
+.bottom-nav-track {
+  pointer-events: auto;
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  padding: 5px;
+  border-radius: 26px;
+  background: rgba(255, 253, 248, 0.86);
+  -webkit-backdrop-filter: blur(12px) saturate(155%);
+  backdrop-filter: blur(12px) saturate(155%);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 14px 34px -6px rgba(15, 23, 42, 0.16),
+    0 2px 8px rgba(15, 23, 42, 0.06),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95);
+}
+.dark .bottom-nav-track {
+  background: rgba(18, 24, 38, 0.86);
+  border-color: rgba(255, 244, 222, 0.14);
+  box-shadow:
+    0 18px 40px -6px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 246, 228, 0.14);
+}
+html.dark[data-palette="oxford"] .bottom-nav-track {
+  background: rgba(11, 27, 20, 0.88);
+  border-color: rgba(167, 243, 208, 0.15);
+}
+html.dark[data-palette="burgundy"] .bottom-nav-track {
+  background: rgba(28, 12, 18, 0.88);
+  border-color: rgba(253, 164, 175, 0.15);
+}
+
+.bottom-nav-items {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  gap: 2px;
+}
+
+/* Sliding Active Glass Pill */
+.bottom-nav-indicator {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  z-index: 1;
+  border-radius: 21px;
+  background: linear-gradient(145deg, rgba(30, 58, 95, 0.13), rgba(201, 162, 77, 0.14));
+  border: 1px solid rgba(30, 58, 95, 0.14);
+  box-shadow:
+    0 4px 12px rgba(30, 58, 95, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  opacity: 0;
+  will-change: transform, width;
+  transition:
+    transform 0.36s cubic-bezier(0.34, 1.32, 0.64, 1),
+    width 0.32s cubic-bezier(0.34, 1.32, 0.64, 1),
+    opacity 0.2s ease;
+}
+.dark .bottom-nav-indicator {
+  background: linear-gradient(145deg, rgba(201, 162, 77, 0.22), rgba(201, 162, 77, 0.10));
+  border-color: rgba(201, 162, 77, 0.30);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 244, 214, 0.18);
+}
+html[data-palette="oxford"] .bottom-nav-indicator {
+  background: linear-gradient(145deg, rgba(27, 94, 67, 0.14), rgba(16, 185, 129, 0.10));
+  border-color: rgba(27, 94, 67, 0.18);
+}
+html.dark[data-palette="oxford"] .bottom-nav-indicator {
+  background: linear-gradient(145deg, rgba(52, 211, 153, 0.20), rgba(16, 185, 129, 0.10));
+  border-color: rgba(52, 211, 153, 0.28);
+}
+html[data-palette="burgundy"] .bottom-nav-indicator {
+  background: linear-gradient(145deg, rgba(124, 35, 56, 0.14), rgba(225, 29, 72, 0.08));
+  border-color: rgba(124, 35, 56, 0.18);
+}
+html.dark[data-palette="burgundy"] .bottom-nav-indicator {
+  background: linear-gradient(145deg, rgba(251, 113, 133, 0.20), rgba(190, 18, 60, 0.12));
+  border-color: rgba(251, 113, 133, 0.28);
+}
+.bottom-nav-indicator.no-transition,
+.profile-subtabs-indicator.no-transition {
+  transition: none !important;
+}
+
+.bottom-nav-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 7px 4px 6px;
+  border-radius: 20px;
+  color: #64748b;
+  font-weight: 700;
+  transition: color 0.22s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  -webkit-tap-highlight-color: transparent;
+  min-width: 0;
+}
+.dark .bottom-nav-btn {
+  color: #94a3b8;
+}
+.bottom-nav-btn:active {
+  transform: scale(0.92);
+}
+.bottom-nav-btn.is-active {
+  color: #1E3A5F;
+}
+.dark .bottom-nav-btn.is-active {
+  color: #E5C87E;
+}
+html[data-palette="oxford"] .bottom-nav-btn.is-active {
+  color: #1B5E43;
+}
+html.dark[data-palette="oxford"] .bottom-nav-btn.is-active {
+  color: #6EE7B7;
+}
+html[data-palette="burgundy"] .bottom-nav-btn.is-active {
+  color: #7C2338;
+}
+html.dark[data-palette="burgundy"] .bottom-nav-btn.is-active {
+  color: #FDA4AF;
+}
+
+.bottom-nav-icon {
+  font-size: 1.18rem;
+  line-height: 1.15;
+  display: inline-block;
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bottom-nav-btn.is-active .bottom-nav-icon {
+  transform: translateY(-2px) scale(1.12);
+}
+.bottom-nav-icon.is-popping {
+  animation: tabIconPop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bottom-nav-label {
+  font-size: 10.5px;
+  line-height: 1.15;
+  font-weight: 800;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+/* 3. Profile / Settings Segmented Switcher */
+.profile-subtabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+.dark .profile-subtabs {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(255, 244, 222, 0.12);
+}
+.profile-subtabs-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  z-index: 1;
+  border-radius: 14px;
+  background: #1E3A5F;
+  box-shadow: 0 4px 12px rgba(30, 58, 95, 0.25);
+  opacity: 0;
+  will-change: transform, width;
+  transition:
+    transform 0.34s cubic-bezier(0.34, 1.28, 0.64, 1),
+    width 0.3s cubic-bezier(0.34, 1.28, 0.64, 1),
+    opacity 0.18s ease;
+}
+.dark .profile-subtabs-indicator {
+  background: #C9A24D;
+  box-shadow: 0 4px 14px rgba(201, 162, 77, 0.28);
+}
+html[data-palette="oxford"] .profile-subtabs-indicator {
+  background: #1B5E43;
+}
+html.dark[data-palette="oxford"] .profile-subtabs-indicator {
+  background: #10B981;
+}
+html[data-palette="burgundy"] .profile-subtabs-indicator {
+  background: #7C2338;
+}
+html.dark[data-palette="burgundy"] .profile-subtabs-indicator {
+  background: #E11D48;
+}
+.profile-subtab-btn {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+  transition: color 0.22s ease, transform 0.16s ease;
+}
+.dark .profile-subtab-btn {
+  color: #cbd5e1;
+}
+.profile-subtab-btn:active {
+  transform: scale(0.97);
+}
+.profile-subtab-btn.is-active {
+  color: #ffffff;
+}
+.dark .profile-subtab-btn.is-active {
+  color: #090C12;
+}
+
+/* 4. Directional GPU-Accelerated Tab Transitions */
+@keyframes tabIconPop {
+  0%   { transform: translateY(0) scale(0.88); }
+  55%  { transform: translateY(-4px) scale(1.22); }
+  100% { transform: translateY(-2px) scale(1.12); }
+}
+
+@keyframes tabSlideFromTrailing {
+  0%   { opacity: 0; transform: translate3d(26px, 0, 0) scale(0.985); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tabSlideFromLeading {
+  0%   { opacity: 0; transform: translate3d(-26px, 0, 0) scale(0.985); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tabSlideDownIn {
+  0%   { opacity: 0; transform: translate3d(0, -18px, 0) scale(0.975); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tabSlideUpIn {
+  0%   { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.985); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.tab-slide-next {
+  animation: tabSlideFromTrailing 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tab-slide-prev {
+  animation: tabSlideFromLeading 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+html[dir="rtl"] .tab-slide-next {
+  animation-name: tabSlideFromLeading;
+}
+html[dir="rtl"] .tab-slide-prev {
+  animation-name: tabSlideFromTrailing;
+}
+.tab-slide-down {
+  animation: tabSlideDownIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tab-slide-up {
+  animation: tabSlideUpIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-slide-next,
+  .tab-slide-prev,
+  .tab-slide-down,
+  .tab-slide-up,
+  .tab-animate,
+  .bottom-nav-icon.is-popping {
+    animation: none !important;
+  }
+  .bottom-nav-indicator,
+  .profile-subtabs-indicator,
+  .header-profile-btn,
+  .bottom-nav-btn,
+  .bottom-nav-icon {
+    transition: none !important;
+  }
+}
+
+/* v85 Continuous Finger-Scrubbing on Floating Bottom Tab Bar */
+.bottom-nav-track {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.bottom-nav-track.is-scrubbing .bottom-nav-indicator {
+  box-shadow:
+    0 8px 22px rgba(30, 58, 95, 0.22),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95);
+}
+.dark .bottom-nav-track.is-scrubbing .bottom-nav-indicator {
+  box-shadow:
+    0 8px 24px rgba(201, 162, 77, 0.26),
+    inset 0 1px 0 rgba(255, 244, 214, 0.28);
+}
