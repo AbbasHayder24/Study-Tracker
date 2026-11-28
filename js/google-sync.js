@@ -316,6 +316,53 @@ window.GoogleSync = (function () {
     }
     // Atomic write (no deep-merge into payload) so old deleted keys never corrupt payload
     await db.collection('users').doc(currentUser.uid).set(docData);
+    publishWidgetSummary(payload);
+  }
+
+  function publishWidgetSummary(payload) {
+    try {
+      if (!db || !currentUser || !currentUser.uid) return;
+      const today = window.LedgerEngine && window.LedgerEngine.getTodaySummary
+        ? window.LedgerEngine.getTodaySummary()
+        : { todayISO: '', logged: 0, target: 5.5 };
+      const led = window.LedgerEngine && window.LedgerEngine.computeLedger
+        ? window.LedgerEngine.computeLedger()
+        : null;
+      const books = (payload && payload.books) || [];
+      const todayISO = today.todayISO || (window.AppState ? window.AppState.getLocalTodayISO() : '');
+      const booksToday = books.filter(b => b && b.completed && b.date === todayISO).length;
+
+      // Compute current streak
+      const daySet = new Set(books.filter(b => b && b.completed && (Number(b.minutes) || 0) > 0 && b.date).map(b => b.date));
+      let streak = 0;
+      if (window.AppState && window.AppState.addDaysISO && todayISO) {
+        let cur = daySet.has(todayISO) ? todayISO : window.AppState.addDaysISO(todayISO, -1);
+        while (daySet.has(cur) && streak < 999) {
+          streak++;
+          cur = window.AppState.addDaysISO(cur, -1);
+        }
+      }
+
+      const fmt = (n) => String(Math.round((Number(n) || 0) * 10) / 10);
+      const logged = Math.round((Number(today.logged) || 0) * 10) / 10;
+      const target = Math.round((Number(today.target) || 0) * 10) / 10;
+      const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0;
+      const hourBank = Math.round((Number(led && led.hourBank) || 0) * 10) / 10;
+      const deficit = Math.max(0, Math.round((Number(led && led.carriedDeficit) || 0) * 10) / 10);
+
+      db.collection('widgets').doc(currentUser.uid).set({
+        todayISO,
+        todayText: fmt(logged),
+        targetText: fmt(target),
+        pctText: pct + '%',
+        pct: pct,
+        booksText: String(booksToday),
+        streakText: String(streak),
+        bankText: fmt(hourBank),
+        deficitText: fmt(deficit),
+        updatedAt: Date.now()
+      }).catch(() => {});
+    } catch (e) {}
   }
 
   async function syncNow(silent = false) {
