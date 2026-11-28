@@ -32,6 +32,7 @@ window.GoogleSync = (function () {
   let pushDebounce = null;
   const PRE_SYNC_BACKUP_KEY = 'study_tracker_pre_sync_backup_v1';
   const LAST_SYNCED_SIG_KEY = 'study_tracker_last_synced_sig_v1';
+  const ADMIN_CACHE_KEY = 'study_tracker_admin_uid_v1';
   let signingIn = false;
   let adminCheckUid = null;
   let isAdminFlag = false;
@@ -618,6 +619,7 @@ window.GoogleSync = (function () {
       isAdminFlag = false;
       try {
         localStorage.removeItem('study_tracker_google_uid');
+        localStorage.removeItem(ADMIN_CACHE_KEY);
         localStorage.removeItem(LAST_SYNCED_SIG_KEY);
         sessionStorage.removeItem('study_tracker_google_redirect');
       } catch (e) {}
@@ -642,6 +644,19 @@ window.GoogleSync = (function () {
   async function refreshAdminStatus(force = false) {
     try {
       await ensureInit();
+      if (!currentUser && auth && auth.currentUser) {
+        currentUser = auth.currentUser;
+      }
+      if (!currentUser && auth) {
+        await new Promise((resolve) => {
+          let done = false;
+          const timer = setTimeout(() => { if (!done) { done = true; resolve(); } }, 2200);
+          const unsub = auth.onAuthStateChanged((u) => {
+            if (u) currentUser = u;
+            if (!done) { done = true; clearTimeout(timer); try { unsub(); } catch (e) {} resolve(); }
+          });
+        });
+      }
       if (!currentUser || !db) {
         adminCheckUid = null;
         isAdminFlag = false;
@@ -650,19 +665,30 @@ window.GoogleSync = (function () {
       if (!force && adminCheckUid === currentUser.uid) {
         return isAdminFlag;
       }
-      const snap = await db.collection('admins').doc(currentUser.uid).get();
+      const docRef = db.collection('admins').doc(currentUser.uid);
+      const snap = await docRef.get({ source: 'server' }).catch(() => docRef.get());
       adminCheckUid = currentUser.uid;
       isAdminFlag = !!(snap && snap.exists && (!snap.data() || snap.data().active !== false));
+      try {
+        if (isAdminFlag) localStorage.setItem(ADMIN_CACHE_KEY, currentUser.uid);
+        else localStorage.removeItem(ADMIN_CACHE_KEY);
+      } catch (e) {}
       return isAdminFlag;
     } catch (e) {
-      adminCheckUid = currentUser ? currentUser.uid : null;
-      isAdminFlag = false;
-      return false;
+      return isChallengeAdmin();
     }
   }
 
   function isChallengeAdmin() {
-    return !!(currentUser && adminCheckUid === currentUser.uid && isAdminFlag);
+    if (currentUser && adminCheckUid === currentUser.uid) {
+      return isAdminFlag;
+    }
+    try {
+      const cachedAdminUid = localStorage.getItem(ADMIN_CACHE_KEY);
+      const savedUid = (currentUser && currentUser.uid) || localStorage.getItem('study_tracker_google_uid');
+      if (cachedAdminUid && savedUid && cachedAdminUid === savedUid) return true;
+    } catch (e) {}
+    return false;
   }
 
   async function submitChallengeRequest({ proposedChallenge, proposedStartDate, currentChallenge, currentStartDate, reason }) {

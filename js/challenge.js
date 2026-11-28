@@ -182,7 +182,10 @@ window.ChallengeModule = (function () {
     return window.I18n ? window.I18n.t(key, vars) : key;
   }
 
-  function openEditChallengeModal(rerender) {
+  async function openEditChallengeModal(rerender) {
+    if (window.GoogleSync && window.GoogleSync.refreshAdminStatus) {
+      try { await window.GoogleSync.refreshAdminStatus(true); } catch (e) {}
+    }
     const C = window.APP_CONFIG;
     const data = window.AppState.getData();
     const cfg = window.LedgerEngine.getChallengeConfig();
