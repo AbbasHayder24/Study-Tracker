@@ -1841,3 +1841,80 @@ html[dir="rtl"] .tab-slide-prev {
     0 8px 24px rgba(201, 162, 77, 0.26),
     inset 0 1px 0 rgba(255, 244, 214, 0.28);
 }
+
+/* ==========================================================================
+   v85 Dark Mode Contrast & Readability Fix
+   ========================================================================== */
+html.dark {
+  color-scheme: dark;
+}
+
+/* 1. Prevent .bg-white !important from bleeding white backgrounds into dark inputs & pill switchers */
+.dark .dark\:bg-slate-900 {
+  background: #0E121B !important;
+  color: #F3EFE6;
+}
+.dark .dark\:bg-slate-900\/50 {
+  background: rgba(14, 18, 27, 0.65) !important;
+}
+.dark .dark\:bg-slate-900\/60 {
+  background: rgba(14, 18, 27, 0.78) !important;
+}
+.dark .dark\:bg-slate-700 {
+  background: rgba(42, 51, 68, 0.92) !important;
+}
+.dark .dark\:bg-slate-700\/80 {
+  background: rgba(42, 51, 68, 0.86) !important;
+}
+.dark .dark\:bg-slate-800\/80 {
+  background: rgba(24, 31, 44, 0.88) !important;
+}
+.dark .dark\:bg-slate-800\/90 {
+  background: rgba(24, 31, 44, 0.94) !important;
+}
+
+/* 2. Crisp dark-mode form controls & placeholders */
+.dark input,
+.dark select,
+.dark textarea {
+  color: #F3EFE6;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #9CA3AF;
+  opacity: 1;
+}
+.dark select option {
+  background-color: #141A26;
+  color: #F3EFE6;
+}
+
+/* 3. High-contrast secondary & muted text in dark mode (WCAG AA+) */
+.dark .text-slate-400,
+.dark .dark\:text-slate-400 {
+  color: #B4AEA2;
+}
+.dark .text-slate-500 {
+  color: #BDB7AB;
+}
+.dark .text-slate-600 {
+  color: #D2CCC0;
+}
+.dark .text-slate-700 {
+  color: #E2DCD0;
+}
+.dark .text-slate-800 {
+  color: #F3EFE6;
+}
+
+/* 4. Guarantee crisp ink on Champagne Gold active buttons in Ivory dark mode */
+.dark .bg-indigo-600,
+.dark .bg-indigo-600.text-white {
+  color: #0E121B !important;
+}
+html.dark[data-palette="oxford"] .bg-indigo-600,
+html.dark[data-palette="oxford"] .bg-indigo-600.text-white,
+html.dark[data-palette="burgundy"] .bg-indigo-600,
+html.dark[data-palette="burgundy"] .bg-indigo-600.text-white {
+  color: #FFFFFF !important;
+}
