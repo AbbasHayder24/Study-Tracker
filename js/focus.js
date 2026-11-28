@@ -761,15 +761,30 @@ window.FocusModule = (function () {
         const dataNow = window.AppState.getData();
         const subjects = dataNow.subjects || [];
         const tags = dataNow.tags || [];
-        window.AppUI.openModal({
-          title: ar ? '📚 اختر المادة أو التصنيف' : '📚 Choose Subject or Tag',
-          bodyHtml: `
+
+        const getMatchingSubjects = (tagId) => subjects.filter(s => s.defaultTagId === tagId);
+
+        const renderPickerBody = () => {
+          const matchedSubjects = getMatchingSubjects(selectedTagId);
+          return `
             <div class="space-y-4">
-              ${subjects.length ? `
-                <div>
+              <div>
+                <div class="text-[11px] font-bold text-slate-400 mb-2">${ar ? 'التصنيفات' : 'Tags'}</div>
+                <div class="flex flex-wrap gap-2">
+                  ${tags.map(tg => {
+                    const act = tg.id === selectedTagId;
+                    return `<button type="button" data-pick-focus-tag="${window.AppUI.escapeHtml(tg.id)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition ${act ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}">
+                      <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(tg.color)}"></span>
+                      <span>${window.AppUI.escapeHtml(tg.name)}</span>
+                    </button>`;
+                  }).join('')}
+                </div>
+              </div>
+              ${matchedSubjects.length ? `
+                <div class="tab-animate">
                   <div class="text-[11px] font-bold text-slate-400 mb-2">${ar ? 'المواد' : 'Subjects'}</div>
                   <div class="flex flex-wrap gap-2">
-                    ${subjects.map(s => {
+                    ${matchedSubjects.map(s => {
                       const act = s.id === selectedSubjectId;
                       return `<button type="button" data-pick-focus-subj="${window.AppUI.escapeHtml(s.id)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition ${act ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}">
                         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(s.color)}"></span>
@@ -779,42 +794,51 @@ window.FocusModule = (function () {
                   </div>
                 </div>
               ` : ''}
-              <div>
-                <div class="text-[11px] font-bold text-slate-400 mb-2">${ar ? 'التصنيفات' : 'Tags'}</div>
-                <div class="flex flex-wrap gap-2">
-                  ${tags.map(tg => {
-                    const act = tg.id === selectedTagId && !selectedSubjectId;
-                    return `<button type="button" data-pick-focus-tag="${window.AppUI.escapeHtml(tg.id)}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition ${act ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}">
-                      <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${window.AppUI.escapeHtml(tg.color)}"></span>
-                      <span>${window.AppUI.escapeHtml(tg.name)}</span>
-                    </button>`;
-                  }).join('')}
-                </div>
-              </div>
             </div>
-          `,
-          footerHtml: `<button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'إغلاق' : 'Close'}</button>`
+          `;
+        };
+
+        const bindPickerEvents = () => {
+          document.querySelectorAll('[data-pick-focus-tag]').forEach(b => {
+            b.onclick = () => {
+              const nextTagId = b.getAttribute('data-pick-focus-tag');
+              selectedTagId = nextTagId;
+              const matched = getMatchingSubjects(nextTagId);
+              if (!matched.some(s => s.id === selectedSubjectId)) {
+                selectedSubjectId = '';
+              }
+              saveFocusPrefs();
+              rerender();
+              if (matched.length === 0) {
+                window.AppUI.closeModal();
+              } else {
+                const modalBody = document.getElementById('app-modal-body');
+                if (modalBody) {
+                  modalBody.innerHTML = renderPickerBody();
+                  bindPickerEvents();
+                }
+              }
+            };
+          });
+          document.querySelectorAll('[data-pick-focus-subj]').forEach(b => {
+            b.onclick = () => {
+              const sid = b.getAttribute('data-pick-focus-subj');
+              selectedSubjectId = sid;
+              const sObj = subjects.find(x => x.id === sid);
+              if (sObj && sObj.defaultTagId) selectedTagId = sObj.defaultTagId;
+              saveFocusPrefs();
+              window.AppUI.closeModal();
+              rerender();
+            };
+          });
+        };
+
+        window.AppUI.openModal({
+          title: ar ? '🏷️ اختر التصنيف والمادة' : '🏷️ Choose Tag & Subject',
+          bodyHtml: renderPickerBody(),
+          footerHtml: `<button type="button" onclick="window.AppUI.closeModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-xs font-bold">${ar ? 'تم' : 'Done'}</button>`
         });
-        document.querySelectorAll('[data-pick-focus-subj]').forEach(b => {
-          b.onclick = () => {
-            const sid = b.getAttribute('data-pick-focus-subj');
-            selectedSubjectId = sid;
-            const sObj = (window.AppState.getData().subjects || []).find(x => x.id === sid);
-            if (sObj && sObj.defaultTagId) selectedTagId = sObj.defaultTagId;
-            saveFocusPrefs();
-            window.AppUI.closeModal();
-            rerender();
-          };
-        });
-        document.querySelectorAll('[data-pick-focus-tag]').forEach(b => {
-          b.onclick = () => {
-            selectedTagId = b.getAttribute('data-pick-focus-tag');
-            selectedSubjectId = '';
-            saveFocusPrefs();
-            window.AppUI.closeModal();
-            rerender();
-          };
-        });
+        bindPickerEvents();
       };
     }
 
