@@ -4,6 +4,7 @@
 window.I18n = (function () {
   const C = window.APP_CONFIG;
   let currentLang = 'en';
+  let langPref = 'auto'; // 'auto' | 'ar' | 'en'
 
   const DICT = {
     en: {
@@ -534,8 +535,21 @@ window.I18n = (function () {
     }
   };
 
+  function detectSystemLang() {
+    try {
+      const navLang = (navigator.languages && navigator.languages[0]) || navigator.language || 'en';
+      return /^ar\b/i.test(String(navLang)) ? 'ar' : 'en';
+    } catch (e) {
+      return 'en';
+    }
+  }
+
   function getLang() {
     return currentLang;
+  }
+
+  function getLangPref() {
+    return langPref;
   }
 
   function isRTL() {
@@ -549,30 +563,49 @@ window.I18n = (function () {
     document.title = t('appTitle');
   }
 
+  let langListenerBound = false;
+  function bindSystemLangListener() {
+    if (langListenerBound) return;
+    langListenerBound = true;
+    window.addEventListener('languagechange', () => {
+      if (langPref !== 'auto') return;
+      const next = detectSystemLang();
+      if (next !== currentLang) {
+        applyDomDir(next);
+        if (window.AppState && window.AppState.markLedgerDirty) window.AppState.markLedgerDirty();
+        if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
+      }
+    });
+  }
+
   function initLang() {
     let saved = null;
     try {
       saved = localStorage.getItem(C.LANG_KEY);
     } catch (e) {}
-    applyDomDir(saved === 'ar' ? 'ar' : 'en');
+    langPref = (saved === 'ar' || saved === 'en') ? saved : 'auto';
+    applyDomDir(langPref === 'auto' ? detectSystemLang() : langPref);
+    bindSystemLangListener();
   }
 
   function setLang(lang, persist = true, syncToCloud = true) {
-    const clean = lang === 'ar' ? 'ar' : 'en';
-    applyDomDir(clean);
+    const cleanPref = (lang === 'ar' || lang === 'en' || lang === 'auto') ? lang : 'auto';
+    langPref = cleanPref;
+    const resolved = cleanPref === 'auto' ? detectSystemLang() : cleanPref;
+    applyDomDir(resolved);
     if (persist) {
       try {
-        localStorage.setItem(C.LANG_KEY, clean);
+        localStorage.setItem(C.LANG_KEY, cleanPref);
       } catch (e) {}
     }
     if (syncToCloud && window.AppState) {
       const data = window.AppState.getData();
       if (data && data.settings) {
-        data.settings.lang = clean;
+        data.settings.lang = cleanPref;
         window.AppState.save(true);
       }
     }
-    return clean;
+    return resolved;
   }
 
   function toggleLang() {
@@ -593,6 +626,8 @@ window.I18n = (function () {
   return {
     initLang,
     getLang,
+    getLangPref,
+    detectSystemLang,
     isRTL,
     setLang,
     toggleLang,

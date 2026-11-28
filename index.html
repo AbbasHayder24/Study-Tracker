@@ -20,7 +20,7 @@
       try {
         var saved = localStorage.getItem('study_tracker_theme');
         var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        var isDark = (saved === 'dark' || (!saved && sysDark));
+        var isDark = (saved === 'dark' || ((!saved || saved === 'auto') && sysDark));
         if (isDark) {
           document.documentElement.classList.add('dark');
           var tc = document.getElementById('meta-theme-color');
@@ -36,7 +36,9 @@
           }
         }
         var lang = localStorage.getItem('study_tracker_lang');
-        if (lang === 'ar') {
+        var sysLang = ((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();
+        var effectiveLang = (lang === 'ar' || lang === 'en') ? lang : (sysLang.indexOf('ar') === 0 ? 'ar' : 'en');
+        if (effectiveLang === 'ar') {
           document.documentElement.lang = 'ar';
           document.documentElement.dir = 'rtl';
         }

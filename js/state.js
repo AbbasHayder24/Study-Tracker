@@ -88,6 +88,8 @@ window.AppState = (function () {
     if (savedTab && VALID_TABS.has(savedTab)) activeTab = savedTab;
   } catch (e) {}
   let isDark = false;
+  let themePref = 'auto'; // 'auto' | 'light' | 'dark'
+  let themeMediaBound = false;
   let currentPalette = 'ivory';
   let syncStatus = { state: 'idle', lastSyncedAt: null, lastError: '' };
 
@@ -288,11 +290,11 @@ window.AppState = (function () {
   }
 
   function applySyncedPreferences() {
-    if (data.settings && (data.settings.lang === 'ar' || data.settings.lang === 'en') && window.I18n) {
+    if (data.settings && (data.settings.lang === 'ar' || data.settings.lang === 'en' || data.settings.lang === 'auto') && window.I18n) {
       window.I18n.setLang(data.settings.lang, true, false);
     }
-    if (data.settings && (data.settings.theme === 'dark' || data.settings.theme === 'light')) {
-      applyTheme(data.settings.theme === 'dark', true, false);
+    if (data.settings && (data.settings.theme === 'dark' || data.settings.theme === 'light' || data.settings.theme === 'auto')) {
+      setThemePref(data.settings.theme, true, false);
     }
     if (data.settings && (data.settings.palette === 'ivory' || data.settings.palette === 'oxford' || data.settings.palette === 'burgundy')) {
       applyPalette(data.settings.palette, true, false);
@@ -555,10 +557,8 @@ window.AppState = (function () {
       savedTheme = localStorage.getItem(C.THEME_KEY);
     } catch (e) {}
 
-    if (savedTheme === 'dark') isDark = true;
-    else if (savedTheme === 'light') isDark = false;
-    else if (tg && tg.colorScheme === 'dark') isDark = true;
-    else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) isDark = true;
+    themePref = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'auto';
+    isDark = themePref === 'auto' ? detectSystemDark() : (themePref === 'dark');
 
     let savedPal = 'ivory';
     try {
@@ -568,7 +568,45 @@ window.AppState = (function () {
     currentPalette = savedPal;
     document.documentElement.setAttribute('data-palette', currentPalette);
     applyTheme(isDark, false, false);
+
+    if (!themeMediaBound && window.matchMedia) {
+      themeMediaBound = true;
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const onSysThemeChange = () => {
+        if (themePref !== 'auto') return;
+        applyTheme(detectSystemDark(), false, false);
+        if (window.StudyApp && window.StudyApp.renderHeader) window.StudyApp.renderHeader();
+      };
+      if (mq.addEventListener) mq.addEventListener('change', onSysThemeChange);
+      else if (mq.addListener) mq.addListener(onSysThemeChange);
+    }
   }
+
+  function detectSystemDark() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.colorScheme === 'dark') return true;
+    if (tg && tg.colorScheme === 'light') return false;
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  function setThemePref(pref, persist = true, syncToCloud = true) {
+    const clean = (pref === 'dark' || pref === 'light' || pref === 'auto') ? pref : 'auto';
+    themePref = clean;
+    const dark = clean === 'auto' ? detectSystemDark() : (clean === 'dark');
+    applyTheme(dark, false, false);
+    if (persist) {
+      try {
+        localStorage.setItem(C.THEME_KEY, clean);
+      } catch (e) {}
+    }
+    if (syncToCloud && data && data.settings) {
+      data.settings.theme = clean;
+      save(true);
+    }
+    return isDark;
+  }
+
+  function getThemePref() { return themePref; }
 
   function applyTheme(dark, persist = true, syncToCloud = false) {
     isDark = !!dark;
@@ -618,8 +656,7 @@ window.AppState = (function () {
   function getPalette() { return currentPalette; }
 
   function toggleTheme() {
-    applyTheme(!isDark, true, true);
-    return isDark;
+    return setThemePref(isDark ? 'light' : 'dark', true, true);
   }
 
   function getIsDark() { return isDark; }
@@ -655,6 +692,8 @@ window.AppState = (function () {
     syncNow,
     initThemeAndTelegram,
     applyTheme,
+    setThemePref,
+    getThemePref,
     toggleTheme,
     getIsDark,
     applyPalette,

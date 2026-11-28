@@ -370,20 +370,33 @@ window.ProfileModule = (function () {
 
   function renderSettingsContent() {
     const ar = isAr();
-    const isDark = window.AppState && window.AppState.getIsDark ? window.AppState.getIsDark() : false;
+    const themePref = window.AppState && window.AppState.getThemePref ? window.AppState.getThemePref() : 'auto';
+    const langPref = window.I18n && window.I18n.getLangPref ? window.I18n.getLangPref() : 'auto';
     const settingsHtml = window.SettingsModule ? window.SettingsModule.render() : '';
+    const pillCls = (act) => act
+      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+      : 'bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-200 border-transparent';
+
     return `
       <div class="space-y-4">
-        <!-- Quick Display & Language Toggles (formerly in Drawer Footer) -->
-        <div class="grid grid-cols-2 gap-2">
-          <button id="prof-quick-theme-btn" type="button" class="py-2.5 px-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
-            <span>${isDark ? '☀️' : '🌙'}</span>
-            <span>${isDark ? (ar ? 'الوضع الفاتح' : 'Light Mode') : (ar ? 'الوضع الداكن' : 'Dark Mode')}</span>
-          </button>
-          <button id="prof-quick-lang-btn" type="button" class="py-2.5 px-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
-            <span>🌐</span>
-            <span>${ar ? 'English' : 'العربية'}</span>
-          </button>
+        <!-- Device-Synced Appearance & Language Card -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+          <div>
+            <div class="text-xs font-bold text-slate-700 dark:text-slate-200 mb-2">🌗 ${ar ? 'المظهر (الوضع الداكن)' : 'Appearance'}</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button type="button" data-prof-theme="auto" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(themePref === 'auto')}">📱 ${ar ? 'الجهاز' : 'Device'}</button>
+              <button type="button" data-prof-theme="light" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(themePref === 'light')}">☀️ ${ar ? 'فاتح' : 'Light'}</button>
+              <button type="button" data-prof-theme="dark" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(themePref === 'dark')}">🌙 ${ar ? 'داكن' : 'Dark'}</button>
+            </div>
+          </div>
+          <div class="pt-2.5 border-t border-slate-100 dark:border-slate-700">
+            <div class="text-xs font-bold text-slate-700 dark:text-slate-200 mb-2">🌐 ${ar ? 'اللغة' : 'Language'}</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button type="button" data-prof-lang="auto" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(langPref === 'auto')}">📱 ${ar ? 'الجهاز' : 'Device'}</button>
+              <button type="button" data-prof-lang="ar" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(langPref === 'ar')}">العربية</button>
+              <button type="button" data-prof-lang="en" class="py-2 px-2 rounded-xl text-[11px] font-bold border transition ${pillCls(langPref === 'en')}">English</button>
+            </div>
+          </div>
         </div>
         ${settingsHtml}
       </div>
@@ -464,21 +477,25 @@ window.ProfileModule = (function () {
   }
 
   function bindSettingsEvents(rerender) {
-    const themeBtn = document.getElementById('prof-quick-theme-btn');
-    if (themeBtn) {
-      themeBtn.onclick = () => {
-        window.AppState.toggleTheme();
+    document.querySelectorAll('[data-prof-theme]').forEach(btn => {
+      btn.onclick = () => {
+        const next = btn.getAttribute('data-prof-theme');
+        if (window.AppState && window.AppState.setThemePref) {
+          window.AppState.setThemePref(next, true, true);
+        }
         if (rerender) rerender();
       };
-    }
-    const langBtn = document.getElementById('prof-quick-lang-btn');
-    if (langBtn) {
-      langBtn.onclick = () => {
-        window.I18n.toggleLang();
-        window.AppState.markLedgerDirty();
+    });
+    document.querySelectorAll('[data-prof-lang]').forEach(btn => {
+      btn.onclick = () => {
+        const next = btn.getAttribute('data-prof-lang');
+        if (window.I18n && window.I18n.setLang) {
+          window.I18n.setLang(next, true, true);
+        }
+        if (window.AppState && window.AppState.markLedgerDirty) window.AppState.markLedgerDirty();
         if (window.StudyApp && window.StudyApp.renderAll) window.StudyApp.renderAll();
       };
-    }
+    });
     if (window.SettingsModule && window.SettingsModule.bindEvents) {
       window.SettingsModule.bindEvents(rerender);
     }
