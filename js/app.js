@@ -702,25 +702,39 @@ window.StudyApp = (function () {
     let startX = 0;
     let startY = 0;
     let tracking = false;
+    let swipeContext = ''; // 'modal' | 'zen' | 'profile' | 'tabs'
 
     document.addEventListener('touchstart', (e) => {
       if (!e.touches || e.touches.length !== 1) { tracking = false; return; }
-      if (document.body.classList.contains('zen-mode-active')) { tracking = false; return; }
-      const modal = document.getElementById('app-modal-backdrop');
-      if (modal && !modal.classList.contains('hidden')) { tracking = false; return; }
-
-      const active = window.AppState.getActiveTab();
-      if (active === 'profile') { tracking = false; return; }
 
       const target = e.target;
       if (target && target.closest && (
         target.closest('#focus-dial-container') ||
         target.closest('.overflow-x-auto') ||
         target.closest('#app-bottom-nav') ||
-        target.closest('input, textarea, select, button')
+        target.closest('input, textarea, select')
       )) {
         tracking = false;
         return;
+      }
+
+      const modal = document.getElementById('app-modal-backdrop');
+      const modalOpen = !!(modal && !modal.classList.contains('hidden'));
+      const zenActive = document.body.classList.contains('zen-mode-active');
+      const active = window.AppState.getActiveTab();
+
+      if (modalOpen) {
+        swipeContext = 'modal';
+      } else if (zenActive) {
+        swipeContext = 'zen';
+      } else if (active === 'profile') {
+        swipeContext = 'profile';
+      } else {
+        if (target && target.closest && target.closest('button')) {
+          tracking = false;
+          return;
+        }
+        swipeContext = 'tabs';
       }
 
       const t0 = e.touches[0];
@@ -735,18 +749,51 @@ window.StudyApp = (function () {
       const t1 = e.changedTouches[0];
       const dx = t1.clientX - startX;
       const dy = t1.clientY - startY;
-      if (Math.abs(dx) < 68 || Math.abs(dy) > Math.abs(dx) * 0.65) return;
-
-      const active = window.AppState.getActiveTab();
-      const idx = BOTTOM_TABS.findIndex(tb => tb.id === active);
-      if (idx === -1) return;
+      if (Math.abs(dx) < 62 || Math.abs(dy) > Math.abs(dx) * 0.65) return;
 
       const isRtl = document.documentElement.dir === 'rtl';
-      // In LTR: swipe left (dx < 0) -> next tab; in RTL: swipe right (dx > 0) -> next tab
-      const step = isRtl ? (dx > 0 ? 1 : -1) : (dx < 0 ? 1 : -1);
-      const targetIdx = idx + step;
-      if (targetIdx >= 0 && targetIdx < BOTTOM_TABS.length) {
-        switchTab(BOTTOM_TABS[targetIdx].id);
+      // Language-aware Back/Exit swipe: Arabic (RTL) = right->left (dx < 0), English (LTR) = left->right (dx > 0)
+      const isBackSwipe = isRtl ? (dx < -62) : (dx > 62);
+
+      if (swipeContext === 'modal') {
+        if (isBackSwipe && window.AppUI && window.AppUI.closeModal) {
+          window.AppUI.closeModal();
+        }
+        return;
+      }
+
+      if (swipeContext === 'zen') {
+        if (isBackSwipe) {
+          const zenExitBtn = document.getElementById('focus-zen-exit');
+          if (zenExitBtn) zenExitBtn.click();
+        }
+        return;
+      }
+
+      if (swipeContext === 'profile') {
+        const settingsBtn = document.querySelector('#profile-subtabs-bar [data-prof-subtab="settings"].is-active');
+        if (isBackSwipe) {
+          if (settingsBtn && window.ProfileModule && window.ProfileModule.setSubTab) {
+            window.ProfileModule.setSubTab('overview', true);
+          } else {
+            switchTab(lastBottomTab || 'focus');
+          }
+        } else if (!settingsBtn && window.ProfileModule && window.ProfileModule.setSubTab) {
+          // Opposite horizontal swipe on Profile Overview switches smoothly into Settings
+          window.ProfileModule.setSubTab('settings', true);
+        }
+        return;
+      }
+
+      if (swipeContext === 'tabs') {
+        const active = window.AppState.getActiveTab();
+        const idx = BOTTOM_TABS.findIndex(tb => tb.id === active);
+        if (idx === -1) return;
+        const step = isRtl ? (dx > 0 ? 1 : -1) : (dx < 0 ? 1 : -1);
+        const targetIdx = idx + step;
+        if (targetIdx >= 0 && targetIdx < BOTTOM_TABS.length) {
+          switchTab(BOTTOM_TABS[targetIdx].id);
+        }
       }
     }, { passive: true });
   }
