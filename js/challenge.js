@@ -8,6 +8,175 @@ window.ChallengeModule = (function () {
     if (savedSub === 'summary' || savedSub === 'log' || savedSub === 'reviews') subView = savedSub;
   } catch (e) {}
   let selectedWeek = 'auto';
+  let cachedRequests = [];
+  let lastApprovalFetchAt = 0;
+
+  function isRtlLang() {
+    return !!(window.I18n && window.I18n.isRTL());
+  }
+
+  function isAdminUser() {
+    return !window.GoogleSync || !window.GoogleSync.isChallengeAdmin || window.GoogleSync.isChallengeAdmin();
+  }
+
+  function sumWeeklyTargets(targets) {
+    if (!targets) return 0;
+    return Math.round(Object.values(targets).reduce((s, v) => s + (Number(v) || 0), 0) * 100) / 100;
+  }
+
+  function buildChallengeDiffHtml(curCh, curStart, propCh, propStart) {
+    const ar = isRtlLang();
+    const hUnit = t('hrs');
+    const items = [];
+    const oldWks = curCh ? curCh.totalWeeks : '—';
+    const newWks = propCh ? propCh.totalWeeks : '—';
+    if (oldWks !== newWks) items.push(`${ar ? 'الأسابيع' : 'Weeks'}: ${oldWks} ← <strong>${newWks}</strong>`);
+
+    const oldWkHrs = curCh ? sumWeeklyTargets(curCh.dailyTargets) : 0;
+    const newWkHrs = propCh ? sumWeeklyTargets(propCh.dailyTargets) : 0;
+    if (oldWkHrs !== newWkHrs) items.push(`${ar ? 'هدف الأسبوع' : 'Weekly'}: ${oldWkHrs}${hUnit} ← <strong>${newWkHrs}${hUnit}</strong>`);
+
+    if (curCh && propCh && Number(curCh.weeklyFlexHours) !== Number(propCh.weeklyFlexHours)) {
+      items.push(`${ar ? 'الفلكس' : 'Flex'}: ${curCh.weeklyFlexHours}${hUnit} ← <strong>${propCh.weeklyFlexHours}${hUnit}</strong>`);
+    }
+    if (curCh && propCh && Number(curCh.dailyGraceHours) !== Number(propCh.dailyGraceHours)) {
+      items.push(`${ar ? 'السماحية' : 'Grace'}: ${curCh.dailyGraceHours}${hUnit} ← <strong>${propCh.dailyGraceHours}${hUnit}</strong>`);
+    }
+    if (curCh && propCh && Number(curCh.penaltyThresholdHours) !== Number(propCh.penaltyThresholdHours)) {
+      items.push(`${ar ? 'حد العقوبة' : 'Penalty'}: ${curCh.penaltyThresholdHours}${hUnit} ← <strong>${propCh.penaltyThresholdHours}${hUnit}</strong>`);
+    }
+    if (propStart && curStart && propStart !== curStart) {
+      items.push(`${ar ? 'البداية' : 'Start'}: ${window.AppUI.escapeHtml(curStart)} ← <strong>${window.AppUI.escapeHtml(propStart)}</strong>`);
+    }
+    if (!items.length) {
+      items.push(ar ? 'تحديث إعدادات التحدي' : 'Updated challenge settings');
+    }
+    return items.map(x => `<span class="inline-block px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-[10px] text-slate-700 dark:text-slate-200">${x}</span>`).join(' ');
+  }
+
+  function renderApprovalSlotHtml() {
+    const ar = isRtlLang();
+    const isAdmin = isAdminUser();
+    if (!cachedRequests.length) return '';
+
+    if (isAdmin) {
+      const pending = cachedRequests.filter(r => r.status === 'pending');
+      if (!pending.length) return '';
+      return `
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-amber-300 dark:border-amber-500/60 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-extrabold text-amber-700 dark:text-amber-300">📥 ${ar ? `طلبات تعديل التحدي (${pending.length})` : `Challenge Approval Requests (${pending.length})`}</h3>
+          </div>
+          <div class="space-y-2.5">
+            ${pending.map(req => `
+              <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-xs font-extrabold text-slate-800 dark:text-slate-100 truncate">👤 ${window.AppUI.escapeHtml(req.name || req.email || 'Student')}</div>
+                  <span class="text-[10px] text-slate-400 shrink-0">${req.createdAt ? new Date(req.createdAt).toLocaleDateString() : ''}</span>
+                </div>
+                ${req.reason ? `<div class="text-[11px] text-slate-600 dark:text-slate-300">“${window.AppUI.escapeHtml(req.reason)}”</div>` : ''}
+                <div class="flex flex-wrap gap-1.5">${buildChallengeDiffHtml(req.currentChallenge, req.currentStartDate, req.proposedChallenge, req.proposedStartDate)}</div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  <button type="button" data-approve-req="${window.AppUI.escapeHtml(req.id)}" class="py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold">✅ ${ar ? 'موافقة' : 'Approve'}</button>
+                  <button type="button" data-reject-req="${window.AppUI.escapeHtml(req.id)}" class="py-2 rounded-xl bg-rose-600 text-white text-xs font-bold">❌ ${ar ? 'رفض' : 'Reject'}</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    const latest = cachedRequests[0];
+    if (!latest) return '';
+    if (latest.status === 'pending') {
+      return `
+        <div class="rounded-2xl p-3.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/60 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-2">
+          <span>⏳ ${ar ? 'لديك طلب تعديل للتحدي بانتظار موافقة المشرف.' : 'Your challenge change request is awaiting admin approval.'}</span>
+        </div>
+      `;
+    }
+    if (latest.status === 'rejected' && latest.decidedAt && (Date.now() - latest.decidedAt) < 7 * 86400000) {
+      return `
+        <div class="rounded-2xl p-3.5 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-700/60 text-xs text-rose-700 dark:text-rose-200">
+          ❌ ${ar ? 'تم رفض آخر طلب تعديل للتحدي من قِبل المشرف.' : 'Your last challenge edit request was declined by the admin.'}
+        </div>
+      `;
+    }
+    return '';
+  }
+
+  function bindApprovalSlotEvents(rerender) {
+    const ar = isRtlLang();
+    document.querySelectorAll('[data-approve-req]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute('data-approve-req');
+        btn.disabled = true;
+        const res = await window.GoogleSync.decideChallengeRequest(id, true);
+        if (res && res.ok) {
+          cachedRequests = cachedRequests.filter(r => r.id !== id);
+          window.AppUI.showToast(ar ? 'تمت الموافقة على التعديل ✅' : 'Change approved ✅', 'success');
+          const slot = document.getElementById('challenge-approval-slot');
+          if (slot) { slot.innerHTML = renderApprovalSlotHtml(); bindApprovalSlotEvents(rerender); }
+        } else {
+          btn.disabled = false;
+          window.AppUI.showToast((res && res.error) || 'Error', 'danger');
+        }
+      };
+    });
+    document.querySelectorAll('[data-reject-req]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute('data-reject-req');
+        btn.disabled = true;
+        const res = await window.GoogleSync.decideChallengeRequest(id, false);
+        if (res && res.ok) {
+          cachedRequests = cachedRequests.filter(r => r.id !== id);
+          window.AppUI.showToast(ar ? 'تم رفض الطلب' : 'Request declined', 'info');
+          const slot = document.getElementById('challenge-approval-slot');
+          if (slot) { slot.innerHTML = renderApprovalSlotHtml(); bindApprovalSlotEvents(rerender); }
+        } else {
+          btn.disabled = false;
+          window.AppUI.showToast((res && res.error) || 'Error', 'danger');
+        }
+      };
+    });
+  }
+
+  async function refreshApprovalRequests(rerender, force = false) {
+    if (!window.GoogleSync || !window.GoogleSync.fetchChallengeRequests) return;
+    if (!window.GoogleSync.getUser || !window.GoogleSync.getUser()) return;
+    if (!force && (Date.now() - lastApprovalFetchAt) < 12000) return;
+    lastApprovalFetchAt = Date.now();
+
+    const rows = await window.GoogleSync.fetchChallengeRequests();
+    cachedRequests = rows || [];
+
+    if (!isAdminUser()) {
+      const approvedToApply = cachedRequests.find(r => r.status === 'approved' && !r.applied && r.proposedChallenge);
+      if (approvedToApply) {
+        const data = window.AppState.getData();
+        if (!data.settings) data.settings = {};
+        data.settings.challenge = approvedToApply.proposedChallenge;
+        if (approvedToApply.proposedStartDate && approvedToApply.proposedStartDate !== data.startDate) {
+          data.startDate = approvedToApply.proposedStartDate;
+          data.startDateUpdatedAt = Date.now();
+        }
+        window.AppState.markLedgerDirty();
+        window.AppState.save(true);
+        await window.GoogleSync.markChallengeRequestApplied(approvedToApply.id);
+        approvedToApply.applied = true;
+        window.AppUI.showToast(isRtlLang() ? '✅ تمت موافقة المشرف وتطبيق تعديل التحدي!' : '✅ Admin approved and applied your challenge update!', 'success');
+        if (rerender) rerender();
+        return;
+      }
+    }
+
+    const slot = document.getElementById('challenge-approval-slot');
+    if (slot) {
+      slot.innerHTML = renderApprovalSlotHtml();
+      bindApprovalSlotEvents(rerender);
+    }
+  }
 
   function t(key, vars) {
     return window.I18n ? window.I18n.t(key, vars) : key;
@@ -73,12 +242,19 @@ window.ChallengeModule = (function () {
           <div id="ch-edit-preview" class="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-bold text-center">
             ${cfg.totalDays}d • ${window.AppUI.formatHours(cfg.weeklyTarget)}${hUnit}/wk • ${window.AppUI.formatHours(cfg.totalTargetHours)}${hUnit}
           </div>
+
+          ${!isAdminUser() ? `
+            <div class="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/60 space-y-2">
+              <div class="text-[11px] font-bold text-amber-800 dark:text-amber-200">🔒 ${isAr ? 'تعديل التحدي يتطلب موافقة المشرف' : 'Challenge edits require admin approval'}</div>
+              <input id="ch-edit-reason" type="text" maxlength="140" placeholder="${isAr ? 'سبب التعديل (اختياري)...' : 'Reason for change (optional)...'}" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"/>
+            </div>
+          ` : ''}
         </div>
       `,
       footerHtml: `
-        <button id="ch-edit-reset" type="button" class="px-3 py-2 rounded-xl text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 mr-auto">${t('resetDefaults')}</button>
+        ${isAdminUser() ? `<button id="ch-edit-reset" type="button" class="px-3 py-2 rounded-xl text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 mr-auto">${t('resetDefaults')}</button>` : ''}
         <button id="ch-edit-cancel" type="button" class="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">${t('cancel')}</button>
-        <button id="ch-edit-save" type="button" class="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">${t('save')}</button>
+        <button id="ch-edit-save" type="button" class="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">${isAdminUser() ? t('save') : (isAr ? '📩 إرسال للموافقة' : '📩 Send Request')}</button>
       `
     });
 
@@ -106,7 +282,8 @@ window.ChallengeModule = (function () {
 
     document.getElementById('ch-edit-cancel').onclick = window.AppUI.closeModal;
 
-    document.getElementById('ch-edit-reset').onclick = () => {
+    const resetEl = document.getElementById('ch-edit-reset');
+    if (resetEl) resetEl.onclick = () => {
       document.getElementById('ch-edit-name').value = '';
       document.getElementById('ch-edit-weeks').value = C.CHALLENGE.TOTAL_WEEKS;
       document.getElementById('ch-edit-flex').value = C.CHALLENGE.WEEKLY_FLEX_HOURS;
@@ -119,7 +296,7 @@ window.ChallengeModule = (function () {
       updatePreview();
     };
 
-    document.getElementById('ch-edit-save').onclick = () => {
+    document.getElementById('ch-edit-save').onclick = async () => {
       const newName = document.getElementById('ch-edit-name').value.trim();
       const newStart = document.getElementById('ch-edit-start').value;
       const newWeeks = Math.max(1, Math.min(52, Math.round(Number(document.getElementById('ch-edit-weeks').value) || C.CHALLENGE.TOTAL_WEEKS)));
@@ -135,8 +312,7 @@ window.ChallengeModule = (function () {
         newTargets[dow] = Number.isFinite(v) && v >= 0 ? Math.min(24, v) : 0;
       });
 
-      if (!data.settings) data.settings = {};
-      data.settings.challenge = {
+      const proposedChallenge = {
         name: newName,
         totalWeeks: newWeeks,
         weeklyFlexHours: newFlex,
@@ -144,6 +320,42 @@ window.ChallengeModule = (function () {
         penaltyThresholdHours: newPenalty,
         dailyTargets: newTargets
       };
+
+      if (!isAdminUser()) {
+        const reasonEl = document.getElementById('ch-edit-reason');
+        const reason = reasonEl ? reasonEl.value.trim() : '';
+        const saveBtn = document.getElementById('ch-edit-save');
+        if (saveBtn) saveBtn.disabled = true;
+        const res = window.GoogleSync && window.GoogleSync.submitChallengeRequest
+          ? await window.GoogleSync.submitChallengeRequest({
+              proposedChallenge,
+              proposedStartDate: newStart || data.startDate,
+              currentChallenge: {
+                name: cfg.name,
+                totalWeeks: cfg.totalWeeks,
+                weeklyFlexHours: cfg.weeklyFlexHours,
+                dailyGraceHours: cfg.dailyGraceHours,
+                penaltyThresholdHours: cfg.penaltyThresholdHours,
+                dailyTargets: cfg.dailyTargets
+              },
+              currentStartDate: data.startDate,
+              reason
+            })
+          : { ok: false, error: 'Sync unavailable' };
+
+        if (res && res.ok) {
+          window.AppUI.closeModal();
+          window.AppUI.showToast(isAr ? '📩 تم إرسال طلب التعديل إلى المشرف للموافقة' : '📩 Edit request sent to admin for approval', 'success');
+          refreshApprovalRequests(rerender, true);
+        } else {
+          if (saveBtn) saveBtn.disabled = false;
+          window.AppUI.showToast((res && res.error) || 'Error', 'warning');
+        }
+        return;
+      }
+
+      if (!data.settings) data.settings = {};
+      data.settings.challenge = proposedChallenge;
 
       if (newStart && newStart !== data.startDate) {
         data.startDate = newStart;
@@ -319,6 +531,7 @@ window.ChallengeModule = (function () {
           <button data-ch-sub="reviews" class="flex-1 py-2 rounded-lg text-xs font-bold transition ${subView === 'reviews' ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}">${t('reviewsTab')}</button>
         </div>
 
+        <div id="challenge-approval-slot">${renderApprovalSlotHtml()}</div>
         ${subView === 'summary' ? renderSummary(ledger) : ''}
         ${subView === 'log' ? renderDailyLog(ledger) : ''}
         ${subView === 'reviews' ? window.ReviewsModule.render(ledger) : ''}
@@ -327,6 +540,8 @@ window.ChallengeModule = (function () {
   }
 
   function bindEvents(rerender) {
+    bindApprovalSlotEvents(rerender);
+    refreshApprovalRequests(rerender, false);
     const ledger = window.LedgerEngine.computeLedger();
     const hUnit = t('hrs');
 

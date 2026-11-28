@@ -33,6 +33,8 @@ window.GoogleSync = (function () {
   const PRE_SYNC_BACKUP_KEY = 'study_tracker_pre_sync_backup_v1';
   const LAST_SYNCED_SIG_KEY = 'study_tracker_last_synced_sig_v1';
   let signingIn = false;
+  let adminCheckUid = null;
+  let isAdminFlag = false;
 
   function isAr() {
     return !!(window.I18n && window.I18n.isRTL());
@@ -124,6 +126,11 @@ window.GoogleSync = (function () {
           const prevUid = currentUser ? currentUser.uid : null;
           currentUser = user || null;
           if (currentUser) {
+            refreshAdminStatus(false).then(() => {
+              if (window.StudyApp && window.StudyApp.renderAll && window.AppState && window.AppState.getActiveTab() === 'challenge') {
+                window.StudyApp.renderAll();
+              }
+            }).catch(() => {});
             try {
               localStorage.setItem('study_tracker_google_uid', currentUser.uid);
               sessionStorage.removeItem('study_tracker_google_redirect');
@@ -607,6 +614,8 @@ window.GoogleSync = (function () {
       queuedSync = false;
       if (auth) await auth.signOut();
       currentUser = null;
+      adminCheckUid = null;
+      isAdminFlag = false;
       try {
         localStorage.removeItem('study_tracker_google_uid');
         localStorage.removeItem(LAST_SYNCED_SIG_KEY);
@@ -628,6 +637,114 @@ window.GoogleSync = (function () {
       email: currentUser.email || '',
       displayName: currentUser.displayName || ''
     } : null;
+  }
+
+  async function refreshAdminStatus(force = false) {
+    try {
+      await ensureInit();
+      if (!currentUser || !db) {
+        adminCheckUid = null;
+        isAdminFlag = false;
+        return false;
+      }
+      if (!force && adminCheckUid === currentUser.uid) {
+        return isAdminFlag;
+      }
+      const snap = await db.collection('admins').doc(currentUser.uid).get();
+      adminCheckUid = currentUser.uid;
+      isAdminFlag = !!(snap && snap.exists && (!snap.data() || snap.data().active !== false));
+      return isAdminFlag;
+    } catch (e) {
+      adminCheckUid = currentUser ? currentUser.uid : null;
+      isAdminFlag = false;
+      return false;
+    }
+  }
+
+  function isChallengeAdmin() {
+    return !!(currentUser && adminCheckUid === currentUser.uid && isAdminFlag);
+  }
+
+  async function submitChallengeRequest({ proposedChallenge, proposedStartDate, currentChallenge, currentStartDate, reason }) {
+    try {
+      await ensureInit();
+      if (!currentUser || !db) {
+        return { ok: false, error: isAr() ? 'سجّل الدخول بحساب Google أولاً لإرسال الطلب' : 'Sign in with Google first to submit a request' };
+      }
+      const data = window.AppState ? window.AppState.getData() : null;
+      const prof = (data && data.settings && data.settings.profile) || {};
+      const displayName = (prof.name && String(prof.name).trim())
+        || (data && data.settings && data.settings.groupNickname)
+        || currentUser.displayName
+        || (currentUser.email ? currentUser.email.split('@')[0] : 'Student');
+
+      const ref = await db.collection('challengeRequests').add({
+        uid: currentUser.uid,
+        name: String(displayName).slice(0, 40),
+        email: currentUser.email || '',
+        status: 'pending',
+        applied: false,
+        proposedChallenge,
+        proposedStartDate: proposedStartDate || '',
+        currentChallenge: currentChallenge || null,
+        currentStartDate: currentStartDate || '',
+        reason: String(reason || '').trim().slice(0, 140),
+        createdAt: Date.now()
+      });
+      return { ok: true, id: ref.id };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || 'Request failed' };
+    }
+  }
+
+  async function fetchChallengeRequests() {
+    try {
+      await ensureInit();
+      if (!currentUser || !db) return [];
+      await refreshAdminStatus(false);
+      const q = isChallengeAdmin()
+        ? db.collection('challengeRequests').where('status', '==', 'pending')
+        : db.collection('challengeRequests').where('uid', '==', currentUser.uid);
+      const snap = await q.get();
+      const rows = [];
+      snap.forEach(doc => rows.push(Object.assign({ id: doc.id }, doc.data() || {})));
+      rows.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      return rows.slice(0, 20);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async function decideChallengeRequest(reqId, approve) {
+    try {
+      await ensureInit();
+      await refreshAdminStatus(false);
+      if (!currentUser || !db || !isChallengeAdmin()) {
+        return { ok: false, error: isAr() ? 'هذه الصلاحية للمشرف فقط' : 'Admin permission required' };
+      }
+      await db.collection('challengeRequests').doc(reqId).update({
+        status: approve ? 'approved' : 'rejected',
+        decidedAt: Date.now(),
+        decidedBy: currentUser.uid
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || 'Update failed' };
+    }
+  }
+
+  async function markChallengeRequestApplied(reqId) {
+    try {
+      await ensureInit();
+      if (!currentUser || !db) return false;
+      await db.collection('challengeRequests').doc(reqId).update({
+        applied: true,
+        appliedAt: Date.now()
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   async function ensureReady() {
@@ -678,6 +795,12 @@ window.GoogleSync = (function () {
     onLocalSave,
     ensureReadyAndSync,
     ensureReady,
+    isChallengeAdmin,
+    refreshAdminStatus,
+    submitChallengeRequest,
+    fetchChallengeRequests,
+    decideChallengeRequest,
+    markChallengeRequestApplied,
     getLocalPreSyncBackup,
     restoreLocalPreSyncBackup,
     restoreCloudBackup
